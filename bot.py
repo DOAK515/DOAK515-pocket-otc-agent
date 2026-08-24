@@ -1,14 +1,27 @@
-import time
-import requests
-import pandas as pd
-import yfinance as yf
+name: Run Bot
 
-print("Bot started successfully...")
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-def main():
-    while True:
-        print("Running bot check...")
-        time.sleep(60)
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-if __name__ == "__main__":
-    main()
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pandas yfinance
+
+    - name: Run bot
+      run: |
+        python bot.py
