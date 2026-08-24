@@ -1,78 +1,27 @@
-import time
-import requests
-import pandas as pd
-import yfinance as yf
-from datetime import datetime, timedelta
+name: Run Bot
 
-# إعدادات تيليجرام
-TELEGRAM_BOT_TOKEN = "7983033116:AAGbLkQZZp0VgLeudB9xF2nEL2Ln00cFJQo"
-TELEGRAM_CHAT_ID = "-1002873715505"
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-OTC_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", 
-    "EURGBP=X", "USDCAD=X", "NZDUSD=X", "EURJPY=X"
-]
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        response = requests.post(url, json=payload)
-        return response.json()
-    except Exception as e:
-        print(f"Error sending telegram message: {e}")
-        return None
+    steps:
+    - uses: actions/checkout@v4
 
-def analyze_market_and_send_signals():
-    print("Bot is scanning OTC market for Pocket Option...")
-    selected_pair = "EUR/USD (OTC)"
-    profit_percentage = 85
-    
-    if profit_percentage >= 80:
-        trade_duration = "5 دقائق"
-        direction = "صعود (CALL)"
-        accuracy_rate = "91%"
-        
-        entry_time = datetime.now() + timedelta(minutes=2)
-        formatted_time = entry_time.strftime("%H:%M")
-        
-        warning_msg = (
-            f"🚨 **تنبيه تحضيري صفقة قادمة!** 🚨\n\n"
-            f"<b>الزوج:</b> {selected_pair}\n"
-            f"<b>النسبة في المنصة:</b> {profit_percentage}%\n"
-            f"جاهزوا أنفسكم، الإشارة ستنطلق بعد **دقيقتين** تماماً!\n"
-            f"⏳ وقت الدخول المرتقب: <b>{formatted_time}</b>"
-        )
-        send_telegram_message(warning_msg)
-        print("Warning sent, waiting 2 minutes for entry...")
-        
-        time.sleep(120)
-        
-        signal_msg = (
-            f"🎯 **إشارة تداول جديدة (بدون مضاعفات)** 🎯\n\n"
-            f"📊 **الزوج:** {selected_pair}\n"
-            f"📈 **الاتجاه:** {direction}\n"
-            f"⏱ **مدّة الصفقة:** {trade_duration}\n"
-            f"🔥 **نسبة نجاح الصفقة المتوقعة:** {accuracy_rate}\n"
-            f"🛡 **ملاحظة:** صفقة منفردة وآمنة بدون دبل أو مضاعفات.\n\n"
-            f"بالتوفيق يا أبو خالد وللأعضاء الأبطال! 💰"
-        )
-        send_telegram_message(signal_msg)
-        print("Signal successfully sent to Telegram channel.")
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-def main():
-    send_telegram_message("🤖 **تم تفعيل بوت التداول الذكي بنجاح يا أبو خالد!** البوت يراقب أزواج الأوتسي الآن...")
-    while True:
-        try:
-            analyze_market_and_send_signals()
-            time.sleep(3600)
-        except Exception as e:
-            print(f"Error in main loop: {e}")
-            time.sleep(60)
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pandas yfinance
 
-if __name__ == "__main__":
-    main()
+    - name: Run bot
+      run: |
+        python bot.py
