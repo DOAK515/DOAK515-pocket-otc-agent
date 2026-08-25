@@ -1,17 +1,19 @@
-name: Run Pocket Option OTC Bot
+name: Pocket Option OTC Bot
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:  # يسمح لك بتشغيله يدوياً متى شئت بضغطة زر
+  workflow_dispatch:  # التشغيل اليدوي المباشر بضغطة زر
   schedule:
-    - cron: '*/10 * * * *'  # يعمل تلقائياً كل 10 دقائق لضمان استمرار البوت
+    - cron: '0 */6 * * *'  # يعمل مرة كل 6 ساعات كخلفية آمنة بدون تكرار مزعج
+
+concurrency:
+  group: pocket-bot-single-instance
+  cancel-in-progress: true  # يمنع فتح أي أمر جديد إذا كان هناك أمر قديم يعمل بالفعل
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
-    - name: Check out repository
+    - name: Checkout repository
       uses: actions/checkout@v3
 
     - name: Set up Python
@@ -24,5 +26,5 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests pandas numpy pytz matplotlib
 
-    - name: Run bot script
+    - name: Run bot
       run: python bot.py
