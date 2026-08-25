@@ -2,8 +2,8 @@ name: Run OTC Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'  # يعمل تلقائياً مع بداية كل ساعة جديدة
-  workflow_dispatch:      # لكي تستطيع تشغيله يدوياً متى شئت
+    - cron: '*/10 * * * *' # يتم إعادة تشغيل البوت كل 10 دقائق لضمان استمراريته وعدم توقفه
+  workflow_dispatch: # يتيح لك تشغيله يدوياً في أي وقت متى شئت
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests pandas yfinance pytz matplotlib
+        pip install requests pandas numpy matplotlib pytz
 
     - name: Run bot
       run: |
