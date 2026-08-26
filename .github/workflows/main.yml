@@ -1,13 +1,13 @@
 name: Pocket Option OTC Bot
 
 on:
-  workflow_dispatch:  # التشغيل اليدوي المباشر بضغطة زر
+  workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'  # يعمل مرة كل 6 ساعات كخلفية آمنة بدون تكرار مزعج
+    - cron: '0 */6 * * *'
 
 concurrency:
   group: pocket-bot-single-instance
-  cancel-in-progress: true  # يمنع فتح أي أمر جديد إذا كان هناك أمر قديم يعمل بالفعل
+  cancel-in-progress: true
 
 jobs:
   run-bot:
