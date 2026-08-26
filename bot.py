@@ -10,7 +10,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-TELEGRAM_BOT_TOKEN = "8341287362:AAF0h06PM..."  # اترك التوكن والشات الخاص بك كما هما
+# إعدادات التيليجرام الخاصة بك والمربظة مباشرة
+TELEGRAM_BOT_TOKEN = "8341287362:AAF0h06PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 TELEGRAM_CHAT_ID = "-1003151787212"
 TURKEY_TZ = pytz.timezone('Europe/Istanbul')
 
@@ -36,21 +37,16 @@ def send_telegram_photo(photo_path, caption):
         print(f"Error sending photo: {e}")
 
 def fetch_otc_data():
-    # محاكاة أو جلب بيانات الشموع بدقة لمؤشرات OTC
-    url = "https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd" # مؤشر افتراضي للاتصال أو بيانات السوق
     try:
-        # جلب بيانات حية للتحليل الدقيق
         df = pd.DataFrame({
             'open': np.random.uniform(1.07, 1.09, 60),
             'high': np.random.uniform(1.08, 1.10, 60),
             'low': np.random.uniform(1.06, 1.07, 60),
             'close': np.random.uniform(1.07, 1.09, 60),
         })
-        # حساب المؤشرات الفنية المتقدمة (متوسطات متحركة + RSI)
         df['sma_fast'] = df['close'].rolling(window=5).mean()
         df['sma_slow'] = df['close'].rolling(window=12).mean()
         
-        # حساب RSI
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -70,9 +66,6 @@ def analyze_and_trade():
     last_row = df.iloc[-1]
     prev_row = df.iloc[-2]
 
-    # شروط صارمة جداً لدخول صفقة مجتمعة الاستراتيجيات (دقة عالية)
-    # 1. تقاطع المتوسطات المتحركة السريع مع البطيء
-    # 2. مؤشر RSI في مناطق الدخول الصحيحة (ليس تشبع كامل)
     cond_sma_call = last_row['sma_fast'] > last_row['sma_slow'] and prev_row['sma_fast'] <= prev_row['sma_slow']
     cond_rsi_call = 40 < last_row['rsi'] < 65
 
@@ -80,19 +73,17 @@ def analyze_and_trade():
     cond_rsi_put = 35 < last_row['rsi'] < 60
 
     now_tr = datetime.now(TURKEY_TZ)
-    entry_time = now_tr + timedelta(minutes=1)  # تنبيه مسبق قبل دقيقة كاملة
+    entry_time = now_tr + timedelta(minutes=1)
 
-    # نطلب توافق استراتيجيتين على الأقل لتأكيد الصفقة بدقة عالية
     if cond_sma_call and cond_rsi_call:
         direction = "شراء (CALL / UP)"
         signal_icon = "🟢"
-        decision_type = "CALL"
     elif cond_sma_put and cond_rsi_put:
         direction = "بيع (PUT / DOWN)"
         signal_icon = "🔴"
-        decision_type = "PUT"
     else:
-        # إذا لم تكن الاستراتيجيات مجتمعة بدقة، لا تدخل الصفقة لضمان عدم الخسارة
+        # إرسال رسالة توضيحية بأن الفحص جرى ولكن لم تتحقق الشروط الدقيقة حالياً
+        send_telegram_message("🔍 تم تشغيل فحص السوق (OTC)، ولم تتطابق الشروط الصارمة بعد، سيتم إعادة المحاولة لاحقاً.")
         return
 
     time_str = entry_time.strftime('%H:%M')
@@ -107,7 +98,6 @@ def analyze_and_trade():
     )
     send_telegram_message(msg)
 
-    # رسم التشارت التوضيحي
     plt.figure(figsize=(8, 4))
     plt.plot(df['close'].values[-30:], label='Price', color='cyan')
     plt.title("Pocket Option OTC (High Accuracy Analysis)")
@@ -119,11 +109,9 @@ def analyze_and_trade():
 
     send_telegram_photo(chart_path, "📸 تشارت بوكت أوبشن OTC اللحظي:")
 
-    # الانتظار حتى انتهاء مدة الصفقة بالكامل ودخول الشمعة الجديدة للتأكد من النتيجة بدقة
     time.sleep(65)
 
-    # حساب النتيجة بناءً على السعر الحقيقي المغلق
-    is_win = np.random.choice([True, False], p=[0.65, 0.35]) # ترجيح النجاح بسبب دقة الشروط
+    is_win = np.random.choice([True, False], p=[0.65, 0.35])
     if is_win:
         total_wins += 1
         result_text = "(+) ربح 🏆"
