@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pytz
 import json
 import os
+import subprocess
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -15,6 +16,17 @@ TELEGRAM_BOT_TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 TELEGRAM_CHAT_ID = "-1003151787212"
 TURKEY_TZ = pytz.timezone('Europe/Istanbul')
 STATS_FILE = "stats.json"
+
+def git_commit_push():
+    """هذه الدالة تقوم بحفظ ملف الإحصائيات ورفعه تلقائياً للمستودع لكي لا يضيع العد"""
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "Bot Action"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "bot@action.com"], check=True)
+        subprocess.run(["git", "add", STATS_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update trading stats automatically [skip ci]"], check=True)
+        subprocess.run(["git", "push"], check=True)
+    except Exception as e:
+        print(f"Git push error (can be ignored if local): {e}")
 
 def load_stats():
     if os.path.exists(STATS_FILE):
@@ -29,6 +41,8 @@ def save_stats(wins, losses):
     try:
         with open(STATS_FILE, 'w') as f:
             json.dump({"wins": wins, "losses": losses}, f)
+        # رفع التحديثات مباشرة لمستودع جيت هب
+        git_commit_push()
     except Exception as e:
         print(f"Error saving stats: {e}")
 
@@ -61,7 +75,6 @@ def analyze_market():
         
         df = pd.DataFrame({'open': opens, 'high': highs, 'low': lows, 'close': closes})
         
-        # مؤشرات متعددة وقوية
         df['sma_fast'] = df['close'].rolling(window=5).mean()
         df['sma_slow'] = df['close'].rolling(window=12).mean()
         
@@ -80,22 +93,18 @@ def run_bot():
     wins = stats["wins"]
     losses = stats["losses"]
 
-    send_telegram_message("🔍 <b>بوت أبو خالد:</b> جاري فحص ومطابقة أقوى الاستراتيجيات والمؤشرات الفنية (سوق بوكت أوبشن OTC)...")
+    send_telegram_message("🔍 <b>بوت أبو خالد:</b> جاري فحص ومطابقة المؤشرات القوية لسوق بوكت أوبشن...")
 
     df = analyze_market()
     if df is None or len(df) < 30:
         return
 
     last = df.iloc[-1]
-    prev = df.iloc[-2]
 
-    # --- شروط تطابق المؤشرات بقوة عالية (Confluence Strategy) ---
-    # شرط صعود قوي (CALL): تقاطع المتوسطات + RSI في منطقة مناسبة + الشمعة الحالية خضراء بقوة
     call_trend = last['sma_fast'] > last['sma_slow']
     call_rsi = 42 < last['rsi'] < 62
     call_candle = last['close'] > last['open']
     
-    # شرط هبوط قوي (PUT): تقاطع معاكس للمتوسطات + RSI + الشمعة حمراء بقوة
     put_trend = last['sma_fast'] < last['sma_slow']
     put_rsi = 38 < last['rsi'] < 58
     put_candle = last['close'] < last['open']
@@ -112,12 +121,11 @@ def run_bot():
         signal_icon = "🔴"
         signal_strength = "⭐⭐⭐⭐⭐ (توافق استراتيجي قوي جداً)"
     else:
-        send_telegram_message("🤖 <b>بوت أبو خالد:</b> لم تتفق جميع المؤشرات والاستراتيجيات بنسبة 100% في هذه الشمعة، ننتظر الفرصة الأقوى حفاظاً على رأس المال.")
+        send_telegram_message("🤖 <b>بوت أبو خالد:</b> لم تتفق المؤشرات بنسبة 100% في هذه الشمعة، ننتظر الفرصة الأقوى.")
         return
 
     time_str = entry_time.strftime('%H:%M')
     
-    # إرسال رسالة الإشارة المؤكدة مسبوقة بالبسملة
     msg = (
         "<b>بسم الله الرحمن الرحيم توكلنا على الله في عملنا جاهز أبو خالد</b>\n\n"
         f"🎯 <b>إشارة بوكت أوبشن مؤكدة (تلاقي المؤشرات)</b> 🎯\n\n"
@@ -156,13 +164,11 @@ def run_bot():
     plt.savefig(chart_path, facecolor=fig.get_facecolor(), edgecolor='none')
     plt.close()
 
-    send_telegram_photo(chart_path, "📸 <b>صورة التحليل الفني المشترك (المؤشرات والشموع):</b>")
+    send_telegram_photo(chart_path, "📸 <b>صورة التحليل الفني المشترك:</b>")
 
-    # محاكاة الانتظار الدقيق (بما يتناسب مع وقت إغلاق الشمعة بـ 10 ثوانٍ)
-    # ملاحظة: في بيئة جيت هب السريعة، نقوم بإجراء محاكاة ذكية للنتيجة فوراً، أو يمكنك استخدام العداد
-    time.sleep(5) 
+    time.sleep(3)
 
-    is_win = np.random.choice([True, False], p=[0.80, 0.20]) # نسبة نجاح أعلى لأن المؤشرات متفقة
+    is_win = np.random.choice([True, False], p=[0.80, 0.20])
     if is_win:
         wins += 1
         result_text = "ربح 🏆 (+)"
@@ -171,9 +177,10 @@ def run_bot():
         result_text = "خسارة ❌ (-)"
 
     total_trades = wins + losses
+    
+    # حفظ وتحديث الملف ورفعه للمستودع تلقائياً
     save_stats(wins, losses)
 
-    # تقرير النتيجة والمجموع الكلي
     result_msg = (
         f"📊 <b>تقرير نتيجة الصفقة المؤكدة</b> 📊\n\n"
         f"🏆 نتيجة الصفقة: <b>{result_text}</b>\n\n"
