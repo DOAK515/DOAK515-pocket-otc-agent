@@ -6,8 +6,10 @@ CHAT_ID = "-1003151787212"
 url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 data = {
     "chat_id": CHAT_ID,
-    "text": "🚀 أهلاً بك يا أبو خالد! تم تشغيل البوت بنجاح تام عبر GitHub Actions وكل شي تمام."
+    "text": "تجربة اتصال بوت أبو خالد"
 }
 
+print("جاري إرسال الطلب إلى تيليجرام...")
 response = requests.post(url, data=data)
-print("Response:", response.text)
+print("حالة الرد من تيليجرام:", response.status_code)
+print("نص الرد من تيليجرام:", response.text)
