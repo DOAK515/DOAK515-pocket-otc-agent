@@ -12,4 +12,8 @@ jobs:
       with:
         python-version: '3.10'
     - run: pip install requests pandas numpy pytz matplotlib
-    - run: python bot.py
+    - name: Run Bot and Send Telegram Message
+      env:
+        TELEGRAM_TOKEN: "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
+        TELEGRAM_CHAT_ID: "-1003151787212"
+      run: python bot.py
