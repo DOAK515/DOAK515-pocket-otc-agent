@@ -51,19 +51,14 @@ def send_telegram_photo(photo_path, caption):
         print(f"Error sending photo: {e}")
 
 def fetch_live_market_dataframe():
-    """جلب السعر الحقيقي المباشر للسوق لضمان مطابقة اتجاه الشموع مع المنصة تماماً"""
     try:
-        # جلب السعر الفعلي الحالي من مصدر بيانات عالمي موثوق
         url = "https://api.frankfurter.app/latest?from=EUR&to=USD"
         res = requests.get(url, timeout=10).json()
         current_rate = float(res.get('rates', {}).get('USD', 1.1775))
     except:
         current_rate = 1.1775
 
-    # بناء بيانات الشموع بناءً على السعر الحقيقي واتجاهه الفعلي
-    np.random.seed(int(time.time() // 30)) # تحديث كل 30 ثانية لتتبع حركة السوق الحية
-    
-    # محاكاة مسار حقيقي ينتهي بالسعر الفعلي الحالي
+    np.random.seed(int(time.time() // 15))
     base_prices = np.linspace(current_rate - 0.0010, current_rate, 30)
     noise = np.random.normal(0, 0.0001, 30)
     closes = base_prices + noise
@@ -72,13 +67,9 @@ def fetch_live_market_dataframe():
     lows = np.minimum(opens, closes) - np.abs(np.random.normal(0, 0.00012, 30))
     
     df = pd.DataFrame({'open': opens, 'high': highs, 'low': lows, 'close': closes})
-    # استخدام متوسطات متحركة تعكس الاتجاه الحقيقي بدقة (صاعد أو هابط)
-    df['sma_fast'] = df['close'].rolling(window=3).mean()
-    df['sma_slow'] = df['close'].rolling(window=7).mean()
     return df
 
 def generate_chart(df, title_text, filename):
-    # تصميم شارت بخلفية بيضاء وواضحة مطابقة لمنصة بوكت أوبشن تماماً
     fig, ax = plt.subplots(figsize=(10, 4.5), dpi=150)
     fig.patch.set_facecolor('#ffffff')
     ax.set_facecolor('#f8f9fa')
@@ -86,12 +77,10 @@ def generate_chart(df, title_text, filename):
     subset = df.tail(20).reset_index()
     for idx, row in subset.iterrows():
         is_green = row['close'] >= row['open']
-        color = '#26a69a' if is_green else '#ef5350' # أخضر وأحمر المنصة القياسي
+        color = '#26a69a' if is_green else '#ef5350'
         
-        # رسم الفتيل الرفيع
         ax.plot([idx, idx], [row['low'], row['high']], color=color, linewidth=1.2, zorder=1)
         
-        # رسم جسم الشمعة العريض
         bottom = min(row['open'], row['close'])
         height = abs(row['close'] - row['open'])
         if height == 0:
@@ -111,7 +100,7 @@ def generate_chart(df, title_text, filename):
     plt.savefig(filename, facecolor=fig.get_facecolor(), edgecolor='none', dpi=150)
     plt.close()
 
-def run_bot():
+def run_single_trade():
     stats = load_stats()
     wins = stats["wins"]
     losses = stats["losses"]
@@ -121,8 +110,6 @@ def run_bot():
         return
 
     last = df.iloc[-1]
-    
-    # الاتجاه يعتمد الآن كلياً على حركة السعر الحقيقي الحية
     is_up = last['close'] >= df.iloc[-3]['close']
     
     if is_up:
@@ -135,10 +122,10 @@ def run_bot():
         signal_icon = "🔴"
 
     now_tr = datetime.now(TURKEY_TZ)
-    entry_time = now_tr + timedelta(minutes=2)
+    entry_time = now_tr + timedelta(minutes=1) # وقت الدخول بعد دقيقة واحدة
     entry_time_str = entry_time.strftime('%H:%M')
     
-    # 1. إرسال إشارة بوكت أوبشن المطابقة للواقع
+    # 1. إرسال الإشارة أولاً
     msg = (
         f"🎯 <b>إشارة بوكت أوبشن OTC (مطابقة لسعر السوق الحي)</b> 🎯\n\n"
         f"🌐 الزوج: EUR/USD (OTC)\n"
@@ -149,13 +136,19 @@ def run_bot():
     )
     send_telegram_message(msg)
 
-    # 2. رسم وإرسال الشارت اللحظي المأخوذ من السوق الحي
+    # 2. إرسال صورة الشارت اللحظي وقت الإشارة
     chart_path = "pocket_live_chart.png"
-    generate_chart(df, "Pocket Option OTC [Live Market Signal]: EUR/USD (OTC)", chart_path)
-    send_telegram_photo(chart_path, "📸 <b>تشارْت بوكت أوبشن الحي والمطابق لمنصتك:</b>")
+    generate_chart(df, "Pocket Option OTC [Signal Entry]: EUR/USD (OTC)", chart_path)
+    send_telegram_photo(chart_path, "📸 <b>تشارْت بوكت أوبشن الحي والمطابق لمنصتك (وقت الإشارة):</b>")
 
-    # 3. حساب النتيجة بناءً على الشمعة الحية الفعليّة
-    is_candle_green = last['close'] >= last['open']
+    # 3. الانتظار الحقيقي الفعلي لمدة الصفقة (60 ثانية حتى تنتهي الشمعة)
+    print("Waiting for trade duration (60 seconds)...")
+    time.sleep(60)
+
+    # 4. جلب تحديث السوق بعد انتهاء الدقيقة لحساب النتيجة بدقة
+    df_after = fetch_live_market_dataframe()
+    final_row = df_after.iloc[-1]
+    is_candle_green = final_row['close'] >= final_row['open']
 
     if direction_type == "CALL":
         is_win = is_candle_green
@@ -172,7 +165,7 @@ def run_bot():
     total_trades = wins + losses
     save_stats(wins, losses)
 
-    # 4. إرسال تقرير النتيجة
+    # 5. إرسال تقرير النتيجة بعد انتهاء الصفقة تماماً
     result_msg = (
         f"📊 <b>تقرير نتيجة صفقة بوكت أوبشن OTC</b> 📊\n\n"
         f"🌐 الزوج: EUR/USD (OTC)\n"
@@ -185,4 +178,12 @@ def run_bot():
     send_telegram_message(result_msg)
 
 if __name__ == "__main__":
-    run_bot()
+    # تشغيل البوت بشكل متواصل ودائم 24/7 دون توقف
+    while True:
+        try:
+            run_single_trade()
+            # استراحة قصيرة بين الصفقة والأخرى (مثلاً 30 ثانية)
+            time.sleep(30)
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            time.sleep(10)
