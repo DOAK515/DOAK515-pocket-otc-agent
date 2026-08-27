@@ -1,12 +1,12 @@
-name: Run Bot
+name: Continuous Trading Bot 24/7
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # يتم تشغيل البوت تلقائياً كل 5 دقائق
+    - cron: '*/1 * * * *'  # يتم إعادة تشغيل السكربت تلقائياً كل دقيقة لضمان العمل المستمر 24/7
   workflow_dispatch:
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
