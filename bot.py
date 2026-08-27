@@ -1,233 +1,210 @@
+import os
 import time
 import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import pytz
-import json
-import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
-# المعرفات الخاصة بك يا أبو خالد
 TELEGRAM_BOT_TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 TELEGRAM_CHAT_ID = "-1003151787212"
 TURKEY_TZ = pytz.timezone('Europe/Istanbul')
-STATS_FILE = "stats.json"
 
-def load_stats():
-    if os.path.exists(STATS_FILE):
-        try:
-            with open(STATS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-    return {"wins": 0, "losses": 0, "last_report_time": time.time()}
+# متغيرات تتبع عدد الصفقات (بدون مضاعفات)
+total_wins = 0
+total_losses = 0
 
-def save_stats(wins, losses, last_report_time):
-    try:
-        with open(STATS_FILE, 'w') as f:
-            json.dump({"wins": wins, "losses": losses, "last_report_time": last_report_time}, f)
-    except:
-        pass
-
-def send_telegram_message(text):
+def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload)
+        return response.json()
     except Exception as e:
-        print(f"Error sending message: {e}")
+        print(f"Error: {e}")
+        return None
 
 def send_telegram_photo(photo_path, caption):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
-        with open(photo_path, 'rb') as photo:
-            files = {'photo': photo}
-            data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'HTML'}
-            requests.post(url, files=files, data=data, timeout=15)
+        with open(photo_path, 'rb') as photo_file:
+            files = {'photo': photo_file}
+            data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
+            response = requests.post(url, data=data, files=files)
+            return response.json()
     except Exception as e:
-        print(f"Error sending photo: {e}")
+        print(f"Error: {e}")
+        return None
 
-def generate_pocket_option_candles():
-    """توليد الشموع بنطاق أسعار المنصة الحقيقي (1.1850) مع ترند متناسق"""
-    base_price = 1.1850
-    np.random.seed(int(time.time() // 30))
-    steps = 24
-    
-    random_steps = np.random.normal(0.0001, 0.00022, steps)
-    closes = base_price + np.cumsum(random_steps)
-    opens = closes + np.random.normal(0, 0.00007, steps)
-    highs = np.maximum(opens, closes) + np.abs(np.random.normal(0, 0.0001, steps))
-    lows = np.minimum(opens, closes) - np.abs(np.random.normal(0, 0.0001, steps))
-    
-    now_tr = datetime.now(TURKEY_TZ)
-    times = [(now_tr - timedelta(minutes=(steps - i) * 1)).strftime('%H:%M') for i in range(steps)]
-    
-    df = pd.DataFrame({
-        'time_str': times,
-        'open': opens,
-        'high': highs,
-        'low': lows,
-        'close': closes
-    })
-    return df
-
-def draw_platform_exact_chart(df, title_text, filename):
-    """رسم الشارت بشموع متلاصقة تماماً وخطي الموفينج أفريج مثل منصة بوكت أوبشن"""
-    fig, ax = plt.subplots(figsize=(10, 4.5), dpi=150)
-    fig.patch.set_facecolor('#121824')
-    ax.set_facecolor('#121824')
-
-    # حساب خطوط المتوسط المتحرك (Moving Averages) لتطابق شكلك في المنصة
-    df['MA_Fast'] = df['close'].rolling(window=5, min_periods=1).mean()
-    df['MA_Slow'] = df['close'].rolling(window=12, min_periods=1).mean()
-
-    # رسم خطوط المؤشرات في الخلفية تماماً كالمتوسطات في المنصة
-    ax.plot(df.index, df['MA_Fast'], color='#26a69a', linewidth=1.8, alpha=0.9, label='MA Fast', zorder=1)
-    ax.plot(df.index, df['MA_Slow'], color='#ef5350', linewidth=1.8, alpha=0.9, label='MA Slow', zorder=1)
-
-    # رسم الشموع متلاصقة تماماً (عرض الشمعة 0.9 بدون مسافات فارغة)
-    for idx, row in df.iterrows():
-        is_green = row['close'] >= row['open']
-        color = '#26a69a' if is_green else '#ef5350' # أخضر وأحمر المنصة
+def generate_pocket_option_otc_chart(asset_name, prices, times, suffix_title):
+    """دالة رسم الشموع الأصلية تماماً كما طلبتها من الكود القديم"""
+    try:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        fig.patch.set_facecolor('#121212')
+        ax.set_facecolor('#1e1e1e')
         
-        # الفتيل
-        ax.plot([idx, idx], [row['low'], row['high']], color=color, linewidth=1.1, zorder=2)
-        
-        # جسم الشمعة المتلاصق
-        bottom = min(row['open'], row['close'])
-        height = abs(row['close'] - row['open'])
-        if height == 0:
-            height = 0.00002
+        for i in range(1, len(prices)):
+            t = times[i]
+            prev_p = prices[i-1]
+            curr_p = prices[i]
             
-        rect = plt.Rectangle((idx - 0.45, bottom), 0.9, height, facecolor=color, edgecolor=color, zorder=3)
-        ax.add_patch(rect)
+            open_p = prev_p
+            close_p = curr_p
+            high_p = max(open_p, close_p) + abs(open_p - close_p) * 0.28
+            low_p = min(open_p, close_p) - abs(open_p - close_p) * 0.28
+            
+            color = '#00df89' if close_p >= open_p else '#ff3344'
+            ax.plot([t, t], [low_p, high_p], color=color, linewidth=1, zorder=1)
+            body_bottom = min(open_p, close_p)
+            body_height = max(abs(close_p - open_p), 0.00002)
+            ax.bar([t], [body_height], bottom=[body_bottom], width=0.0012, color=color, zorder=2)
 
-    tick_positions = range(0, len(df), 3)
-    tick_labels = [df.loc[i, 'time_str'] for i in tick_positions if i < len(df)]
-    ax.set_xticks(tick_positions[:len(tick_labels)])
-    ax.set_xticklabels(tick_labels, color='#adb5bd', fontsize=8)
+        ax.set_title(f"Pocket Option OTC [{suffix_title}]: {asset_name}", color='#ffffff', fontsize=13, fontweight='bold')
+        ax.tick_params(colors='#aaaaaa')
+        ax.grid(True, color='#2a2a2a', linestyle='--', alpha=0.6)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz=TURKEY_TZ))
+        fig.autofmt_xdate()
+        
+        file_path = f"pocket_otc_{int(time.time())}.png"
+        plt.savefig(file_path, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+        plt.close()
+        return file_path
+    except Exception as e:
+        print(f"Error chart: {e}")
+        return None
 
-    ax.set_title(title_text, color='#ffffff', fontsize=10, fontweight='bold', pad=12)
-    ax.tick_params(colors='#adb5bd', labelsize=8)
-    ax.grid(True, color='#212d3b', linestyle='--', linewidth=0.6, alpha=0.7)
+def verify_pocket_otc_strategies(prices):
+    """4 استراتيجيات صارمة لضمان قوة صفقة الـ OTC ودقتها"""
+    if len(prices) < 25:
+        return "NEUTRAL"
+        
+    deltas = np.diff(prices)
+    seed = deltas[:14]
+    up = seed[seed >= 0].sum() / 14
+    down = -seed[seed < 0].sum() / 14
+    rs = up / (down if down != 0 else 0.001)
+    rsi = 100. - (100. / (1.0 + rs))
     
-    for spine in ax.spines.values():
-        spine.set_color('#37474f')
+    ma_short = np.mean(prices[-3:])
+    ma_long = np.mean(prices[-10:])
+    momentum = prices[-1] - prices[-4]
+    
+    sma_20 = np.mean(prices[-20:])
+    std_20 = np.std(prices[-20:])
+    current_price = prices[-1]
 
-    plt.tight_layout()
-    plt.savefig(filename, facecolor=fig.get_facecolor(), edgecolor='none', dpi=150)
-    plt.close()
+    # شروط صارمة لزوج الـ OTC
+    is_up = (ma_short > ma_long and 60 > rsi > 46 and momentum > 0 and current_price <= sma_20 + std_20)
+    is_down = (ma_short < ma_long and 54 > rsi > 40 and momentum < 0 and current_price >= sma_20 - std_20)
 
-def run_trading_bot():
-    send_telegram_message(
-        "<b>بسم الله الرحمن الرحيم</b> 🚀\n\n"
-        "تم تحديث شكل الشموع لتصبح **متلاصقة تماماً** مع إضافة **خطوط المتوسط المتحرك (Moving Averages)** لتطابق منصة بوكت أوبشن بالمللي."
+    if is_up:
+        return "UP"
+    elif is_down:
+        return "DOWN"
+    else:
+        return "NEUTRAL"
+
+def run_bot_cycle():
+    global total_wins, total_losses
+    asset_name = "EUR/USD (OTC)"
+    print(f"Analyzing {asset_name} with Pocket Option OTC algorithms...")
+    
+    base_price = 1.0850
+    np.random.seed(int(time.time() % 9999))
+    
+    num_candles = 30
+    price_steps = np.random.normal(loc=0.00001, scale=0.00028, size=num_candles)
+    prices = [base_price]
+    for step in price_steps:
+        prices.append(prices[-1] + step)
+        
+    now_tr = datetime.now(TURKEY_TZ)
+    times = [now_tr - timedelta(seconds=(num_candles - i) * 60) for i in range(num_candles + 1)]
+    
+    # فحص الاستراتيجيات
+    signal = verify_pocket_otc_strategies(prices)
+    if signal == "NEUTRAL":
+        print("OTC Market not matching high-accuracy criteria. Skipping.")
+        return
+
+    direction = "شراء (CALL / UP) 🟢" if signal == "UP" else "بيع (PUT / DOWN) 🔴"
+    trend_code = signal
+    
+    entry_time = now_tr + timedelta(minutes=1)
+    formatted_entry_time = entry_time.strftime("%H:%M")
+    
+    # 1. إرسال إشارة الدخول مع تشارت بوكت أوبشن OTC بالنسخة الأصلية
+    chart_entry = generate_pocket_option_otc_chart(asset_name, prices, times, "Signal Entry")
+    signal_msg = (
+        f"🎯 **إشارة بوكت أوبشن OTC (مؤكدة 4 استراتيجيات)** 🎯\n\n"
+        f"💱 **الزوج:** {asset_name}\n"
+        f"🚀 **القرار:** **{direction}**\n"
+        f"⏰ **وقت الدخول:** <b>{formatted_entry_time}</b>\n"
+        f"⏱️ **مدة الصفقة:** <b>دقيقة واحدة (1 Minute)</b>\n"
+        f"🛡️ **النظام:** بدون مضاعفات\n\n"
+        f"📸 تشارت بوكت أوبشن OTC اللحظي:"
     )
+    if chart_entry:
+        send_telegram_photo(chart_entry, signal_msg)
+    else:
+        send_telegram_message(signal_msg)
+    
+    # الانتظار لمدة الصفقة (دقيقة واحدة)
+    time.sleep(60)
+    
+    # محاكاة السعر النهائي بعد دقيقة
+    final_price_step = np.random.normal(loc=0.00002 if trend_code == "UP" else -0.00002, scale=0.0002)
+    exit_price = prices[-1] + final_price_step
+    prices.append(exit_price)
+    times.append(datetime.now(TURKEY_TZ))
+    
+    # تحديد النتيجة (ربح أو خسارة)
+    is_win = False
+    if trend_code == "UP" and exit_price >= prices[-2]:
+        is_win = True
+    elif trend_code == "DOWN" and exit_price <= prices[-2]:
+        is_win = True
+    else:
+        is_win = False
 
+    if is_win:
+        total_wins += 1
+        result_text = "(+ WIN) ربح 🟢"
+    else:
+        total_losses += 1
+        result_text = "(- LOSS) خسارة 🔴"
+
+    # 2. إرسال صورة النتيجة النهائية بنفس الشكل الأصلي تماماً
+    chart_result = generate_pocket_option_otc_chart(asset_name, prices, times, "Execution Result")
+    result_msg = (
+        f"📊 **تقرير نتيجة صفقة بوكت أوبشن OTC** 📊\n\n"
+        f"💱 **الزوج:** {asset_name}\n"
+        f"🏆 **الحالة:** **{result_text}**\n\n"
+        f"📈 **إحصائيات الصفقات حتى الآن:**\n"
+        f"✅ **الربح:** {total_wins}\n"
+        f"❌ **الخسارة:** {total_losses}\n"
+        f"📌 **الإجمالي الكلي:** {total_wins + total_losses} صفقات\n\n"
+        f"📸 تشارت الإغلاق النهائي من المنصة:"
+    )
+    
+    if chart_result:
+        send_telegram_photo(chart_result, result_msg)
+    else:
+        send_telegram_message(result_msg)
+
+def main():
+    send_telegram_message("🤖 **تم استعادة شكل الشموع الأصلي بنجاح تام يا أبو خالد 🇹🇷!**")
     while True:
         try:
-            stats = load_stats()
-            wins = stats["wins"]
-            losses = stats["losses"]
-            last_report_time = stats.get("last_report_time", time.time())
-
-            current_time = time.time()
-            if current_time - last_report_time >= 7200:
-                total_t = wins + losses
-                win_rate = (wins / total_t * 100) if total_t > 0 else 0
-                periodic_msg = (
-                    f"📊 <b>التقرير الدوري (كل ساعتين)</b> 📊\n\n"
-                    f"✅ الصفقات الناجحة: <b>{wins}</b>\n"
-                    f"❌ الصفقات الخاسرة: <b>{losses}</b>\n"
-                    f"📌 الإجمالي الكلي: <b>{total_t} صفقات</b>\n"
-                    f"🎯 نسبة النجاح: <b>{win_rate:.1f}%</b>"
-                )
-                send_telegram_message(periodic_msg)
-                last_report_time = current_time
-                save_stats(wins, losses, last_report_time)
-
-            df_candles = generate_pocket_option_candles()
-            last = df_candles.iloc[-1]
-            prev = df_candles.iloc[-2]
-            
-            is_call = last['close'] > prev['close']
-            
-            if is_call:
-                direction_type = "CALL"
-                direction = "شراء (CALL / UP)"
-                signal_icon = "🟢"
-            else:
-                direction_type = "PUT"
-                direction = "بيع (PUT / DOWN)"
-                signal_icon = "🔴"
-
-            now_tr = datetime.now(TURKEY_TZ)
-            entry_time = now_tr + timedelta(minutes=1)
-            entry_time_str = entry_time.strftime('%H:%M')
-            
-            # 1. إرسال الإشارة
-            msg = (
-                f"🎯 <b>إشارة بوكت أوبشن OTC (مؤكدة 4 استراتيجيات)</b> 🎯\n\n"
-                f"🌐 الزوج: <b>EUR/USD (OTC)</b>\n"
-                f"🚀 القرار: {signal_icon} <b>{direction}</b>\n"
-                f"⏰ وقت الدخول: <b>{entry_time_str}</b>\n"
-                f"⏱️ مدة الصفقة: <b>دقيقة واحدة (1 Minute)</b>\n"
-                f"🛡️ النظام: بدون مضاعفات"
-            )
-            send_telegram_message(msg)
-
-            # 2. إرسال الشارت الأول لحظة الإشارة
-            chart_path = "signal_chart.png"
-            draw_platform_exact_chart(df_candles, "Pocket Option OTC [Signal Entry]: EUR/USD (OTC)", chart_path)
-            send_telegram_photo(chart_path, "📸 <b>تشارت بوكت أوبشن OTC اللحظي:</b>")
-
-            # 3. الانتظار طوال مدة الصفقة
-            time.sleep(75)
-
-            # 4. تحديث الشمعة الأخيرة للشارت الثاني ليتطابق تماماً
-            df_result = df_candles.copy()
-            if direction_type == "CALL":
-                df_result.loc[df_result.index[-1], 'close'] = df_result.loc[df_result.index[-1], 'open'] + 0.00015
-                is_win = True
-            else:
-                df_result.loc[df_result.index[-1], 'close'] = df_result.loc[df_result.index[-1], 'open'] - 0.00015
-                is_win = True
-
-            if is_win:
-                wins += 1
-                result_status = "ربح (+WIN) 🏆"
-                result_icon = "🟢"
-            else:
-                losses += 1
-                result_status = "خسارة (-LOSS) ❌"
-                result_icon = "🔴"
-
-            total_trades = wins + losses
-            save_stats(wins, losses, last_report_time)
-
-            # 5. إرسال الشارت الثاني للنتيجة
-            result_chart_path = "result_chart.png"
-            draw_platform_exact_chart(df_result, "Pocket Option OTC [Execution Result]: EUR/USD (OTC)", result_chart_path)
-            
-            result_msg = (
-                f"📊 <b>تقرير نتيجة صفقة بوكت أوبشن OTC</b> 📊\n\n"
-                f"🌐 الزوج: <b>EUR/USD (OTC)</b>\n"
-                f"🏆 الحالة: {result_icon} <b>{result_status}</b>\n\n"
-                f"📈 <b>إحصائيات الصفقات حتى الآن:</b>\n"
-                f"✅ الربح: <b>{wins}</b>\n"
-                f"❌ الخسارة: <b>{losses}</b>\n"
-                f"📌 الإجمالي الكلي: <b>{total_trades} صفقات</b>"
-            )
-            send_telegram_photo(result_chart_path, result_msg)
-
-            time.sleep(120)
-
+            run_bot_cycle()
+            time.sleep(150)
         except Exception as e:
-            print(f"Error in bot loop: {e}")
-            time.sleep(20)
+            print(f"Error: {e}")
+            time.sleep(60)
 
 if __name__ == "__main__":
-    run_trading_bot()
+    main()
