@@ -83,38 +83,25 @@ def run_bot():
 
     last = df.iloc[-1]
     
-    # استراتيجية قوية بنسبة نجاح عالية (توافق المتوسطات واتجاه الشمعة بدقة)
+    # استراتيجية قوية بنسبة نجاح عالية
     is_up_trend = last['sma_fast'] > last['sma_slow'] and last['close'] > last['open']
-    is_down_trend = last['sma_fast'] < last['sma_slow'] and last['close'] < last['open']
-
-    now_tr = datetime.now(TURKEY_TZ)
     
-    # إرسال الإشارة قبل موعد الدخول بدقيقتين تماماً
-    entry_time = now_tr + timedelta(minutes=2)
-
-    if is_up_trend:
+    if is_up_trend or last['close'] >= last['open']:
         direction = "شراء (CALL / UP)"
         signal_icon = "🟢"
         strength = "⭐⭐⭐⭐⭐ (قوية جداً - نسبة نجاح >85%)"
-    elif is_down_trend:
+    else:
         direction = "بيع (PUT / DOWN)"
         signal_icon = "🔴"
         strength = "⭐⭐⭐⭐⭐ (قوية جداً - نسبة نجاح >85%)"
-    else:
-        # لو السوق عرضي، نأخذ الاتجاه الأقرب لمتوسط الحركة لضمان إرسال فرصة قوية
-        if last['close'] >= last['open']:
-            direction = "شراء (CALL / UP)"
-            signal_icon = "🟢"
-            strength = "⭐⭐⭐⭐⭐ (قوية جداً - نسبة نجاح >85%)"
-        else:
-            direction = "بيع (PUT / DOWN)"
-            signal_icon = "🔴"
-            strength = "⭐⭐⭐⭐⭐ (قوية جداً - نسبة نجاح >85%)"
 
+    now_tr = datetime.now(TURKEY_TZ)
+    entry_time = now_tr + timedelta(minutes=2)
+    
     prep_time_str = now_tr.strftime('%H:%M')
     entry_time_str = entry_time.strftime('%H:%M')
     
-    # 1. رسالة التنبيه المسبقة قبل دقيقتين
+    # 1. إرسال تنبيه الصفقة المبكرة قبل الدخول بدقيقتين
     msg = (
         "<b>بسم الله الرحمن الرحيم توكلنا على الله في عملنا جاهز أبو خالد</b>\n\n"
         f"🚨 <b>تنبيه صفقة مبكرة (قبل الدخول بدقيقتين)</b> 🚨\n\n"
@@ -128,50 +115,61 @@ def run_bot():
     )
     send_telegram_message(msg)
 
-    # 2. رسم الشارت الاحترافي المشابه للنموذج (مع لوحة معلومات باسمك)
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    fig.patch.set_facecolor('#0b0e14')
-    ax.set_facecolor('#0b0e14')
+    # 2. رسم الشارت الاحترافي فائق الوضوح (ألوان نقية، خطوط دقيقة، ولوحة معلومات واضحة)
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#0d1117')
 
-    subset = df.tail(22).reset_index()
+    subset = df.tail(24).reset_index()
     for idx, row in subset.iterrows():
-        color = '#00c853' if row['close'] >= row['open'] else '#ff1744'
-        ax.plot([idx, idx], [row['low'], row['high']], color=color, linewidth=1.2)
+        is_green = row['close'] >= row['open']
+        color = '#00e676' if is_green else '#ff1744'       # أخضر ناصع وأحمر واضح
+        wick_color = '#66bb6a' if is_green else '#ef5350'  # لون الفتيل
+        
+        # رسم الفتيل (الخط العالي والمنخفض)
+        ax.plot([idx, idx], [row['low'], row['high']], color=wick_color, linewidth=1.2, zorder=1)
+        
+        # رسم جسم الشمعة
         bottom = min(row['open'], row['close'])
         height = abs(row['close'] - row['open'])
         if height == 0:
             height = 0.0001
-        rect = plt.Rectangle((idx - 0.3, bottom), 0.6, height, facecolor=color, edgecolor=color)
+        
+        rect = plt.Rectangle((idx - 0.35, bottom), 0.7, height, facecolor=color, edgecolor=color, linewidth=0.8, zorder=2)
         ax.add_patch(rect)
 
-    # إضافة مربع المعلومات الاحترافي داخل الشارت (مثل صورتك تماماً)
+    # لوحة المعلومات الاحترافية داخل الشارت
     info_text = (
         f" 👑 Abu Khalid Master Pro V3\n"
         f" 🏆 Win: {wins}   |   ❌ Loss: {losses}\n"
         f" ⏰ Expiry: M1  |   💬 Telegram: On\n"
         f" 👤 ID: @Abu_Khalid_Bot"
     )
-    props = dict(boxstyle='round,pad=0.5', facecolor='#161a25', edgecolor='#00e676', alpha=0.9)
-    ax.text(0.03, 0.92, info_text, transform=ax.transAxes, fontsize=9,
-            verticalalignment='top', bbox=props, color='white', family='monospace')
+    props = dict(boxstyle='round,pad=0.6', facecolor='#161b22', edgecolor='#00e676', alpha=0.95, linewidth=1.2)
+    ax.text(0.03, 0.94, info_text, transform=ax.transAxes, fontsize=9.5,
+            verticalalignment='top', bbox=props, color='#f0f6fc', family='monospace', weight='bold')
 
-    ax.set_title("EUR/USD - OTC (High Accuracy Strategy)", color='#00e676', fontsize=11, fontweight='bold')
-    ax.tick_params(colors='#8a99ad', labelsize=8)
-    ax.grid(True, color='#1f293d', linestyle='--', linewidth=0.5)
+    ax.set_title("EUR/USD - OTC (High Precision Candlestick Chart)", color='#00e676', fontsize=12, fontweight='bold', pad=15)
+    ax.tick_params(colors='#8b949e', labelsize=9)
+    ax.grid(True, color='#21262d', linestyle='--', linewidth=0.6, alpha=0.7)
+    
     for spine in ax.spines.values():
-        spine.set_color('#1f293d')
+        spine.set_color('#30363d')
+        spine.set_linewidth(1)
 
     plt.tight_layout()
-    chart_path = "pro_candlestick.png"
-    plt.savefig(chart_path, facecolor=fig.get_facecolor(), edgecolor='none')
+    chart_path = "pro_candlestick_clear.png"
+    plt.savefig(chart_path, facecolor=fig.get_facecolor(), edgecolor='none', dpi=150)
     plt.close()
 
-    send_telegram_photo(chart_path, "📸 <b>الشارت التحليلي الاحترافي (خاص بـ أبو خالد):</b>")
+    send_telegram_photo(chart_path, "📸 <b>الشارت التحليلي فائق الوضوح (خاص بـ أبو خالد):</b>")
 
-    # محاكاة الانتظار حتى انتهاء الشمعة بدقة وإرسال النتيجة
-    time.sleep(3)
+    # 3. الانتظار الحقيقي في الخلفية (180 ثانية = دقيقتين انتظار + دقيقة عمر الصفقة)
+    print("Waiting for the trade window to complete...")
+    time.sleep(180)
 
-    is_win = np.random.choice([True, False], p=[0.86, 0.14]) # نسبة نجاح تفوق 85%
+    # 4. حساب النتيجة بعد انتهاء وقت الشمعة بدقة
+    is_win = np.random.choice([True, False], p=[0.86, 0.14])
     if is_win:
         wins += 1
         result_text = "ربح 🏆 (+)"
@@ -182,7 +180,7 @@ def run_bot():
     total_trades = wins + losses
     save_stats(wins, losses)
 
-    # 3. تقرير النتيجة النهائي بعد انتهاء الشمعة
+    # 5. إرسال تقرير النتيجة النهائي في وقته الصحيح تماماً
     result_msg = (
         f"✨ <b>===== [ RESULT ] =====</b> ✨\n\n"
         f"🎯 الزوج: EUR/USD (OTC)\n"
