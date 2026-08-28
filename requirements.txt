@@ -1,0 +1,7 @@
+requests
+pandas
+numpy
+pytz
+matplotlib
+pocketoptionapi
+pocketoptionapi
