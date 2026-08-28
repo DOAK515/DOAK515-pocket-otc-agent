@@ -41,14 +41,17 @@ def send_telegram_photo(photo_path, caption):
         return None
 
 def generate_pocket_option_otc_chart(asset_name, prices, times, suffix_title):
-    """دالة رسم الشموع الأصلية تماماً كما طلبتها من الكود القديم"""
+    """رسم الشموع متلاصقة وعريضة تماماً مثل منصة بوكت أوبشن (بدون تخريب بقية الكود)"""
     try:
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
         fig.patch.set_facecolor('#121212')
         ax.set_facecolor('#1e1e1e')
         
+        # تحويل الأوقات إلى أرقام لتتوافق مع رسم مستطيلات الشموع المتلاصقة بدقة
+        num_times = mdates.date2num(times)
+        
         for i in range(1, len(prices)):
-            t = times[i]
+            t = num_times[i]
             prev_p = prices[i-1]
             curr_p = prices[i]
             
@@ -57,20 +60,28 @@ def generate_pocket_option_otc_chart(asset_name, prices, times, suffix_title):
             high_p = max(open_p, close_p) + abs(open_p - close_p) * 0.28
             low_p = min(open_p, close_p) - abs(open_p - close_p) * 0.28
             
-            color = '#00df89' if close_p >= open_p else '#ff3344'
-            ax.plot([t, t], [low_p, high_p], color=color, linewidth=1, zorder=1)
+            color = '#00df89' if close_p >= open_p else '#ff3344' # أخضر وأحمر المنصة
+            
+            # خط الفتيل (Shadow)
+            ax.plot([t, t], [low_p, high_p], color=color, linewidth=1.1, zorder=1)
+            
+            # جسم الشمعة العريض والمتلاصق تماماً مثل المنصة
             body_bottom = min(open_p, close_p)
             body_height = max(abs(close_p - open_p), 0.00002)
-            ax.bar([t], [body_height], bottom=[body_bottom], width=0.0012, color=color, zorder=2)
+            
+            # عرض الشمعة متناسب مع المسافة الزمنية لتتلاصق تماماً
+            rect = plt.Rectangle((t - 0.00035, body_bottom), 0.0007, body_height, facecolor=color, edgecolor=color, zorder=2)
+            ax.add_patch(rect)
 
         ax.set_title(f"Pocket Option OTC [{suffix_title}]: {asset_name}", color='#ffffff', fontsize=13, fontweight='bold')
-        ax.tick_params(colors='#aaaaaa')
+        ax.tick_params(colors='#aaaaaa', labelsize=9)
         ax.grid(True, color='#2a2a2a', linestyle='--', alpha=0.6)
+        
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz=TURKEY_TZ))
         fig.autofmt_xdate()
         
         file_path = f"pocket_otc_{int(time.time())}.png"
-        plt.savefig(file_path, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+        plt.savefig(file_path, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none', dpi=150)
         plt.close()
         return file_path
     except Exception as e:
@@ -113,7 +124,7 @@ def run_bot_cycle():
     asset_name = "EUR/USD (OTC)"
     print(f"Analyzing {asset_name} with Pocket Option OTC algorithms...")
     
-    base_price = 1.0850
+    base_price = 1.1850  # مطابق لنطاق السعر الحقيقي في صورتك (1.1850)
     np.random.seed(int(time.time() % 9999))
     
     num_candles = 30
@@ -137,7 +148,7 @@ def run_bot_cycle():
     entry_time = now_tr + timedelta(minutes=1)
     formatted_entry_time = entry_time.strftime("%H:%M")
     
-    # 1. إرسال إشارة الدخول مع تشارت بوكت أوبشن OTC بالنسخة الأصلية
+    # 1. إرسال إشارة الدخول مع تشارت بوكت أوبشن OTC المتلاصق بدقة
     chart_entry = generate_pocket_option_otc_chart(asset_name, prices, times, "Signal Entry")
     signal_msg = (
         f"🎯 **إشارة بوكت أوبشن OTC (مؤكدة 4 استراتيجيات)** 🎯\n\n"
@@ -178,7 +189,7 @@ def run_bot_cycle():
         total_losses += 1
         result_text = "(- LOSS) خسارة 🔴"
 
-    # 2. إرسال صورة النتيجة النهائية بنفس الشكل الأصلي تماماً
+    # 2. إرسال صورة النتيجة النهائية
     chart_result = generate_pocket_option_otc_chart(asset_name, prices, times, "Execution Result")
     result_msg = (
         f"📊 **تقرير نتيجة صفقة بوكت أوبشن OTC** 📊\n\n"
@@ -197,7 +208,7 @@ def run_bot_cycle():
         send_telegram_message(result_msg)
 
 def main():
-    send_telegram_message("🤖 **تم استعادة شكل الشموع الأصلي بنجاح تام يا أبو خالد 🇹🇷!**")
+    send_telegram_message("🤖 **تم ضبط شكل الشموع لتصبح متلاصقة وعريضة تماماً مطابقة لمنصة بوكت أوبشن يا أبو خالد 🇹🇷!**")
     while True:
         try:
             run_bot_cycle()
