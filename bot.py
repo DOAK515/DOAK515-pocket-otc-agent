@@ -437,6 +437,5 @@ def main():
 
             time.sleep(5)
 
-versions = True
 if __name__ == "__main__":
     main()
