@@ -2,7 +2,7 @@ name: Continuous Trading Bot 24/7
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  # يتم إعادة تشغيل السكربت تلقائياً كل دقيقة لضمان العمل المستمر 24/7
+    - cron: '*/1 * * * *' # العمل المستمر كل دقيقة
   workflow_dispatch:
 
 jobs:
@@ -19,7 +19,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests pandas numpy pytz matplotlib
+          python -m pip install --upgrade pip
+          pip install requests pandas numpy pytz matplotlib pocketoptionapi
 
       - name: Run bot script
         run: |
