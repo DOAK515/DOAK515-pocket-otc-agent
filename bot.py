@@ -116,15 +116,11 @@ def send_telegram_photo(photo_path, caption):
         return None
 
 # ============================================================
-# POCKET OPTION HTTP DATAFETCHER (بدون ويب ستاكيت)
+# POCKET OPTION HTTP DATAFETCHER
 # ============================================================
 
 def fetch_pocket_option_candles():
-    """
-    سحب الشموع مباشرة عبر طلب HTTP مباشر يحاكي متصفح المستخدم
-    ليكون مطابقاً تماماً لما يظهر على منصة بوكت أوبشن OTC
-    """
-    url = "https://pocketoption.com/api/v1/candles"  # نقطة الاتصال العامة للبيانات
+    url = "https://pocketoption.com/api/v1/candles"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://pocketoption.com/en/cabinet/demo-quick-high-low/",
@@ -132,7 +128,6 @@ def fetch_pocket_option_candles():
         "X-Requested-With": "XMLHttpRequest"
     }
     
-    # محاولة جلب البيانات عبر API المنصة، وإن لم تتوفر استجابة مباشرة، نستخدم بديل موثوق للأسعار
     try:
         params = {
             "asset": ASSET,
@@ -151,18 +146,12 @@ def fetch_pocket_option_candles():
     except Exception as e:
         logger.warning(f"API fetch warning: {e}, using fallback secure simulation...")
 
-    # في حال احتياج نظام بديل قوي لبيانات الـ OTC في حال تحديث الروابط
     return generate_otc_fallback_candles()
 
 def generate_otc_fallback_candles():
-    """
-    توليد وتحديث بيانات حقيقية متوافقة مع حركة السوق الفعلي للزوج 
-    لضمان عدم توقف البوت أبداً وإرسال الإشارات بدقة 9 استراتيجيات
-    """
     now = int(time.time())
     current_bucket = (now // CANDLE_PERIOD) * CANDLE_PERIOD
     
-    # جلب أسعار حية لحظية من مصدر مجاني موثوق كمرجع أساسي لحركة الشموع
     try:
         r = requests.get("https://api.coincap.io/v2/rates/euro", timeout=5)
         base_price = float(r.json().get("data", {}).get("rateUsd", 1.08)) * 1.05
@@ -198,7 +187,7 @@ def normalize_candles(df):
     rename_map = {}
     for column in df.columns:
         c = str(column).lower().strip()
-        if c in ("time", "timestamp", "created_at", "at", "time_":
+        if c in ("time", "timestamp", "created_at", "at", "time_"):
             rename_map[column] = "timestamp"
         elif c in ("open", "o"):
             rename_map[column] = "open"
@@ -418,7 +407,7 @@ def send_result(trade, result_df):
 def main():
     logger.info("Starting EUR/USD OTC HTTP signal bot...")
     load_stats()
-    send_telegram_message("🤖 <b>بوت EUR/USD OTC (HTTP) بدأ العمل بنجاح</b>\n📊 نظام توافق 9 استراتيجيات نشط بدون أخطاء اتصال.")
+    send_telegram_message("🤖 <b>بوت EUR/USD OTC (HTTP) بدأ العمل بنجاح</b>\n📊 نظام توافق 9 استراتيجيات نشط بدون أخطاء.")
 
     last_signal_timestamp = None
 
@@ -440,7 +429,6 @@ def main():
             if signal:
                 trade = send_signal(df, signal)
                 if trade:
-                    # الانتظار حتى تنتهي شمعة الدخول ونجلب النتيجة
                     time.sleep(65)
                     result_df = fetch_pocket_option_candles()
                     if result_df is not None:
