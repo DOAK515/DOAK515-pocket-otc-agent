@@ -10,7 +10,6 @@ concurrency:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
 
     steps:
       - name: Checkout repository
@@ -20,7 +19,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -32,18 +30,18 @@ jobs:
         run: |
           python -c "from pocketoptionapi import PocketOption; print('PocketOption API import OK')"
 
-      - name: Check required secrets
+      - name: Check secrets
         env:
           PO_SSID: ${{ secrets.PO_SSID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          test -n "$PO_SSID" || (echo "PO_SSID is missing" && exit 1)
-          test -n "$TELEGRAM_BOT_TOKEN" || (echo "TELEGRAM_BOT_TOKEN is missing" && exit 1)
-          test -n "$TELEGRAM_CHAT_ID" || (echo "TELEGRAM_CHAT_ID is missing" && exit 1)
-          echo "Required secrets are configured."
+          test -n "$PO_SSID" || (echo "ERROR: PO_SSID is missing" && exit 1)
+          test -n "$TELEGRAM_BOT_TOKEN" || (echo "ERROR: TELEGRAM_BOT_TOKEN is missing" && exit 1)
+          test -n "$TELEGRAM_CHAT_ID" || (echo "ERROR: TELEGRAM_CHAT_ID is missing" && exit 1)
+          echo "All required secrets are configured."
 
-      - name: Run Pocket Option OTC Bot
+      - name: Run bot
         env:
           PO_SSID: ${{ secrets.PO_SSID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
