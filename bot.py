@@ -22,9 +22,9 @@ from pocketoptionapi import PocketOption
 # CONFIG
 # ============================================================
 
-PO_SSID = "17092a64-1408-4948-a041-2a7e41594e88"
-TELEGRAM_BOT_TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
-TELEGRAM_CHAT_ID = "-1003151787212"
+PO_SSID = os.getenv("PO_SSID", "").strip()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 ASSET = "EURUSD_otc"
 ASSET_NAME = "EUR/USD (OTC)"
@@ -206,7 +206,7 @@ def connect_pocket_option():
 
     if not PO_SSID:
         raise RuntimeError(
-            "PO_SSID غير موجود."
+            "PO_SSID غير موجود في GitHub Secrets."
         )
 
     logger.info(
