@@ -24,3 +24,10 @@ jobs:
       - name: Run bot script
         run: |
           python bot.py
+requests
+pandas
+numpy
+pytz
+matplotlib
+pocketoptionapi
+pocketoptionapi
