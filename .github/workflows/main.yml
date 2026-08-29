@@ -20,7 +20,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas numpy pytz matplotlib pocketoptionapi
+          pip install requests pandas numpy pytz matplotlib websocket-client
+          pip install git+https://github.com/Vali-99/pocketoptionapi.git
 
       - name: Run bot script
         run: |
