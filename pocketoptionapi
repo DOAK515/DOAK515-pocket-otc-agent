@@ -2,7 +2,7 @@ name: Continuous Trading Bot 24/7
 
 on:
   schedule:
-    - cron: '*/1 * * * *' # العمل المستمر كل دقيقة
+    - cron: '*/1 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas numpy pytz matplotlib websocket-client
+          pip install requests pandas numpy pytz matplotlib pocketoptionapi-async
 
       - name: Run bot script
         run: |
