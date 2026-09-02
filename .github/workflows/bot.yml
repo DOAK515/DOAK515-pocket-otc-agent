@@ -1,64 +1,32 @@
-name: EURUSD REAL FOREX Signal Bot
+name: OTC Trading Signal Bot
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/5 * * * *" # يعمل تلقائياً كل 5 دقائق للبحث عن إشارات
 
 concurrency:
-  group: eurusd-real-forex-bot
+  group: otc-signal-bot-group
   cancel-in-progress: true
 
 jobs:
   run-bot:
-
     runs-on: ubuntu-latest
-
     timeout-minutes: 5
 
     steps:
-
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install requests pandas numpy pytz matplotlib
+          pip install python-telegram-bot pandas numpy matplotlib requests
 
-      - name: Check required secrets
-        env:
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -z "$TWELVE_DATA_API_KEY" ]; then
-            echo "ERROR: TWELVE_DATA_API_KEY is missing"
-            exit 1
-          fi
-
-          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-            echo "ERROR: TELEGRAM_BOT_TOKEN is missing"
-            exit 1
-          fi
-
-          if [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "ERROR: TELEGRAM_CHAT_ID is missing"
-            exit 1
-          fi
-
-          echo "All required secrets exist."
-
-      - name: Run bot
-        env:
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python -u bot.py
+      - name: Run Signal Bot
+        run: python bot.py
