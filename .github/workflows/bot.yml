@@ -3,7 +3,7 @@ name: OTC Trading Signal Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *" # يعمل تلقائياً كل 5 دقائق للبحث عن إشارات
+    - cron: "*/10 * * * *" # يعمل تلقائياً كل 10 ثواني للبحث عن إشارات
 
 concurrency:
   group: otc-signal-bot-group
