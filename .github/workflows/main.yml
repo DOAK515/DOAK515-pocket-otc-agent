@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "*/30 * * * *"
 
 concurrency:
   group: eurusd-otc-signal-bot
@@ -16,11 +16,11 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    timeout-minutes: 350
+    timeout-minutes: 29
 
     steps:
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -33,11 +33,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
 
-      - name: Install BinaryOptionsToolsV2
+      - name: Install PocketOption API
         run: |
-          python -m pip install binaryoptionstoolsv2
+          python -m pip install \
+            "git+https://github.com/chema-creator/PocketOptionApi.git"
 
-      - name: Install other dependencies
+      - name: Install dependencies
         run: |
           python -m pip install \
             requests \
@@ -46,26 +47,28 @@ jobs:
             pytz \
             matplotlib
 
-      - name: Verify Pocket Option library
+      - name: Verify installation
         run: |
           python - <<'PY'
-          from BinaryOptionsToolsV2.pocketoption import PocketOptionAsync
-
-          print("===================================")
-          print("BinaryOptionsToolsV2: OK")
-          print("PocketOptionAsync: OK")
-          print("===================================")
+          from pocketoptionapi import PocketOption
+          print("PocketOption API OK")
+          print("EURUSD_otc configured")
+          print("60-second candles configured")
           PY
 
-      - name: Check Secrets
+      - name: Check secrets
         env:
           PO_SSID: ${{ secrets.PO_SSID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-
           if [ -z "$PO_SSID" ]; then
             echo "ERROR: PO_SSID is missing"
+            exit 1
+          fi
+
+          if [ "$PO_SSID" = "17092" ]; then
+            echo "ERROR: PO_SSID contains only UID"
             exit 1
           fi
 
@@ -79,11 +82,9 @@ jobs:
             exit 1
           fi
 
-          echo "==================================="
-          echo "All required secrets exist."
-          echo "==================================="
+          echo "Required secrets exist."
 
-      - name: Start EURUSD OTC bot
+      - name: Run bot
         env:
           PO_SSID: ${{ secrets.PO_SSID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
