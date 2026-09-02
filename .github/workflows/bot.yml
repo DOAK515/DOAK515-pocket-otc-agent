@@ -1,0 +1,141 @@
+name: EURUSD Real Forex Signal Bot
+
+on:
+
+  workflow_dispatch:
+
+  schedule:
+    - cron: "*/5 * * * *"
+
+concurrency:
+  group: eurusd-real-forex-bot
+  cancel-in-progress: true
+
+jobs:
+
+  run-bot:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+
+    steps:
+
+      # ======================================================
+      # CHECKOUT
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ======================================================
+      # PYTHON
+      # ======================================================
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+
+      # ======================================================
+      # PIP
+      # ======================================================
+
+      - name: Upgrade pip
+        run: |
+          python -m pip install --upgrade pip
+
+
+      # ======================================================
+      # DEPENDENCIES
+      # ======================================================
+
+      - name: Install dependencies
+        run: |
+          python -m pip install \
+            requests \
+            pandas \
+            numpy \
+            pytz \
+            matplotlib
+
+
+      # ======================================================
+      # CHECK BOT FILE
+      # ======================================================
+
+      - name: Check bot.py
+        run: |
+          test -f bot.py
+          python -m py_compile bot.py
+          echo "bot.py syntax OK"
+
+
+      # ======================================================
+      # CHECK SECRETS
+      # ======================================================
+
+      - name: Check Secrets
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+        run: |
+
+          if [ -z "$TWELVE_DATA_API_KEY" ]; then
+            echo "ERROR: TWELVE_DATA_API_KEY is missing"
+            exit 1
+          fi
+
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "ERROR: TELEGRAM_BOT_TOKEN is missing"
+            exit 1
+          fi
+
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "ERROR: TELEGRAM_CHAT_ID is missing"
+            exit 1
+          fi
+
+          echo "All required secrets exist."
+
+
+      # ======================================================
+      # TEST IMPORTS
+      # ======================================================
+
+      - name: Test Python imports
+        run: |
+          python - <<'PY'
+          import requests
+          import pandas
+          import numpy
+          import pytz
+          import matplotlib
+
+          print("requests OK")
+          print("pandas OK")
+          print("numpy OK")
+          print("pytz OK")
+          print("matplotlib OK")
+          print("All imports OK")
+          PY
+
+
+      # ======================================================
+      # RUN BOT
+      # ======================================================
+
+      - name: Run EUR/USD bot
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+        run: |
+          python -u bot.py
