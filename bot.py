@@ -3,7 +3,7 @@ import time
 import json
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 import pandas as pd
@@ -16,45 +16,101 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
 
-from pocketoptionapi import PocketOption
-
 
 # ============================================================
-# CONFIG
+# CONFIGURATION
 # ============================================================
 
-ASSET = "EURUSD_otc"
-ASSET_NAME = "EUR/USD (OTC)"
+# ------------------------------------------------------------
+# Twelve Data
+# ------------------------------------------------------------
 
-CANDLE_PERIOD = 60
-HISTORY_CANDLES = 150
-MIN_CANDLES = 60
-MIN_CONFIRMATIONS = 7
+TWELVE_DATA_API_KEY = os.getenv(
+    "TWELVE_DATA_API_KEY",
+    ""
+).strip()
 
-RESULT_GRACE_SECONDS = 5
-POLL_SECONDS = 3
-
-TURKEY_TZ = pytz.timezone("Europe/Istanbul")
-STATS_FILE = "trading_stats.json"
-STATE_FILE = "bot_state.json"
-
-
-# ============================================================
-# ENVIRONMENT
-# ============================================================
-
-PO_SSID = (
-    os.getenv("PO_SSID", "").strip()
-    or os.getenv("POCKET_OPTION_SSID", "").strip()
+TWELVE_DATA_URL = (
+    "https://api.twelvedata.com/time_series"
 )
 
+# ------------------------------------------------------------
+# REAL FOREX
+# ------------------------------------------------------------
+
+SYMBOL = "EUR/USD"
+SYMBOL_NAME = "EUR/USD"
+
+# 1-minute candles
+INTERVAL = "1min"
+
+# Number of candles requested
+OUTPUTSIZE = 180
+
+# Minimum candles required
+MIN_CANDLES = 80
+
+# ------------------------------------------------------------
+# TRADE
+# ------------------------------------------------------------
+
+# Trade duration = 2 minutes
+TRADE_DURATION_SECONDS = 120
+
+# Signal is for the next candle.
+# Therefore, when a closed candle is detected,
+# the next candle starts 1 minute later.
+SIGNAL_LEAD_SECONDS = 60
+
+# ------------------------------------------------------------
+# SCORE
+# ------------------------------------------------------------
+
+# Do NOT send unless score >= 80/100
+MIN_SCORE = 80
+
+# Minimum difference between CALL and PUT scores
+MIN_SCORE_EDGE = 10
+
+# ------------------------------------------------------------
+# Telegram
+# ------------------------------------------------------------
+
 TELEGRAM_BOT_TOKEN = os.getenv(
-    "TELEGRAM_BOT_TOKEN", ""
+    "TELEGRAM_BOT_TOKEN",
+    ""
 ).strip()
 
 TELEGRAM_CHAT_ID = os.getenv(
-    "TELEGRAM_CHAT_ID", ""
+    "TELEGRAM_CHAT_ID",
+    ""
 ).strip()
+
+# ------------------------------------------------------------
+# Timezone
+# ------------------------------------------------------------
+
+TURKEY_TZ = pytz.timezone(
+    "Europe/Istanbul"
+)
+
+# ------------------------------------------------------------
+# Statistics
+# ------------------------------------------------------------
+
+STATS_FILE = "trading_stats.json"
+
+# ------------------------------------------------------------
+# Polling
+# ------------------------------------------------------------
+
+POLL_SECONDS = 10
+
+# Wait a little after candle expiry
+RESULT_GRACE_SECONDS = 5
+
+# API request timeout
+REQUEST_TIMEOUT = 20
 
 
 # ============================================================
@@ -63,17 +119,21 @@ TELEGRAM_CHAT_ID = os.getenv(
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format=(
+        "%(asctime)s | "
+        "%(levelname)s | "
+        "%(message)s"
+    )
 )
 
-logger = logging.getLogger("EURUSD_OTC_BOT")
+logger = logging.getLogger(
+    "EURUSD_REAL_FOREX_BOT"
+)
 
 
 # ============================================================
-# GLOBALS
+# GLOBAL STATE
 # ============================================================
-
-client = None
 
 total_wins = 0
 total_losses = 0
@@ -81,74 +141,6 @@ total_ties = 0
 total_signals = 0
 
 last_processed_candle = None
-
-
-# ============================================================
-# STATE
-# ============================================================
-
-def load_state():
-
-    global last_processed_candle
-
-    try:
-
-        if not os.path.exists(STATE_FILE):
-            return
-
-        with open(
-            STATE_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            data = json.load(f)
-
-        value = data.get(
-            "last_processed_candle"
-        )
-
-        if value is not None:
-            last_processed_candle = int(value)
-
-        logger.info(
-            "State loaded. Last candle: %s",
-            last_processed_candle
-        )
-
-    except Exception as e:
-
-        logger.warning(
-            "Could not load state: %s",
-            e
-        )
-
-
-def save_state():
-
-    try:
-
-        with open(
-            STATE_FILE,
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            json.dump(
-                {
-                    "last_processed_candle":
-                        last_processed_candle
-                },
-                f,
-                indent=2
-            )
-
-    except Exception as e:
-
-        logger.warning(
-            "Could not save state: %s",
-            e
-        )
 
 
 # ============================================================
@@ -191,15 +183,40 @@ def load_stats():
             data.get("signals", 0)
         )
 
+        logger.info(
+            "Statistics loaded | "
+            "WIN=%s LOSS=%s TIE=%s SIGNALS=%s",
+            total_wins,
+            total_losses,
+            total_ties,
+            total_signals
+        )
+
     except Exception as e:
 
         logger.warning(
-            "Statistics load error: %s",
+            "Could not load statistics: %s",
             e
         )
 
 
 def save_stats():
+
+    data = {
+
+        "wins": total_wins,
+
+        "losses": total_losses,
+
+        "ties": total_ties,
+
+        "signals": total_signals,
+
+        "updated_at":
+            datetime.now(
+                TURKEY_TZ
+            ).isoformat()
+    }
 
     try:
 
@@ -210,16 +227,7 @@ def save_stats():
         ) as f:
 
             json.dump(
-                {
-                    "wins": total_wins,
-                    "losses": total_losses,
-                    "ties": total_ties,
-                    "signals": total_signals,
-                    "updated_at":
-                        datetime.now(
-                            TURKEY_TZ
-                        ).isoformat()
-                },
+                data,
                 f,
                 ensure_ascii=False,
                 indent=2
@@ -228,39 +236,49 @@ def save_stats():
     except Exception as e:
 
         logger.warning(
-            "Statistics save error: %s",
+            "Could not save statistics: %s",
             e
         )
 
 
-def win_rate():
+def get_win_rate():
 
     finished = (
         total_wins +
         total_losses
     )
 
-    if finished == 0:
+    if finished <= 0:
         return 0.0
 
     return (
         total_wins /
         finished
-    ) * 100
+    ) * 100.0
 
 
 # ============================================================
 # TELEGRAM
 # ============================================================
 
-def telegram_message(text):
+def send_telegram_message(
+    message
+):
 
     if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN missing.")
+
+        logger.error(
+            "TELEGRAM_BOT_TOKEN is missing."
+        )
+
         return False
 
     if not TELEGRAM_CHAT_ID:
-        logger.error("TELEGRAM_CHAT_ID missing.")
+
+        logger.error(
+            "TELEGRAM_CHAT_ID is missing."
+        )
+
         return False
 
     url = (
@@ -268,35 +286,72 @@ def telegram_message(text):
         f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     )
 
+    payload = {
+
+        "chat_id":
+            TELEGRAM_CHAT_ID,
+
+        "text":
+            message,
+
+        "parse_mode":
+            "HTML",
+
+        "disable_web_page_preview":
+            True
+    }
+
     try:
 
         response = requests.post(
             url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML"
-            },
-            timeout=20
+            json=payload,
+            timeout=REQUEST_TIMEOUT
         )
 
         response.raise_for_status()
+
+        data = response.json()
+
+        if not data.get("ok", False):
+
+            logger.error(
+                "Telegram API rejected message: %s",
+                data
+            )
+
+            return False
 
         return True
 
     except Exception as e:
 
         logger.error(
-            "Telegram error: %s",
+            "Telegram message error: %s",
             e
         )
 
         return False
 
 
-def telegram_photo(path, caption):
+def send_telegram_photo(
+    photo_path,
+    caption
+):
 
-    if not os.path.exists(path):
+    if not TELEGRAM_BOT_TOKEN:
+        return False
+
+    if not TELEGRAM_CHAT_ID:
+        return False
+
+    if not photo_path:
+        return False
+
+    if not os.path.exists(
+        photo_path
+    ):
+
         return False
 
     url = (
@@ -306,25 +361,46 @@ def telegram_photo(path, caption):
 
     try:
 
-        with open(path, "rb") as f:
+        with open(
+            photo_path,
+            "rb"
+        ) as photo_file:
 
             response = requests.post(
+
                 url,
+
                 data={
                     "chat_id":
                         TELEGRAM_CHAT_ID,
+
                     "caption":
                         caption,
+
                     "parse_mode":
                         "HTML"
                 },
+
                 files={
-                    "photo": f
+                    "photo":
+                        photo_file
                 },
+
                 timeout=30
             )
 
         response.raise_for_status()
+
+        data = response.json()
+
+        if not data.get("ok", False):
+
+            logger.error(
+                "Telegram photo rejected: %s",
+                data
+            )
+
+            return False
 
         return True
 
@@ -339,320 +415,292 @@ def telegram_photo(path, caption):
 
 
 # ============================================================
-# CONNECTION
+# TIME
 # ============================================================
 
-def validate_ssid():
+def utc_now_timestamp():
 
-    if not PO_SSID:
-
-        raise RuntimeError(
-            "PO_SSID is missing."
-        )
-
-    # لا نقبل UID أو رقم فقط.
-    if PO_SSID.isdigit():
-
-        raise RuntimeError(
-            "PO_SSID is invalid: "
-            "you supplied only a number/UID. "
-            "A valid Pocket Option session string "
-            "is required."
-        )
-
-    if (
-        "auth" not in PO_SSID
-        and
-        "session" not in PO_SSID
-    ):
-
-        logger.warning(
-            "PO_SSID does not look like a complete "
-            "Pocket Option auth/session string."
-        )
-
-
-def connect():
-
-    global client
-
-    validate_ssid()
-
-    logger.info(
-        "Connecting to Pocket Option..."
+    return int(
+        datetime.now(
+            timezone.utc
+        ).timestamp()
     )
 
-    client = PocketOption(
-        PO_SSID
+
+def format_time(
+    timestamp
+):
+
+    return datetime.fromtimestamp(
+        float(timestamp),
+        tz=TURKEY_TZ
+    ).strftime(
+        "%H:%M:%S"
     )
 
-    ok, error = client.connect()
 
-    if not ok:
+def format_datetime(
+    timestamp
+):
 
-        raise RuntimeError(
-            f"Pocket Option connection failed: {error}"
-        )
-
-    logger.info(
-        "Pocket Option connected."
+    return datetime.fromtimestamp(
+        float(timestamp),
+        tz=TURKEY_TZ
+    ).strftime(
+        "%Y-%m-%d %H:%M:%S"
     )
-
-    deadline = time.time() + 30
-
-    while time.time() < deadline:
-
-        try:
-
-            if (
-                client.check_connect()
-                and
-                client.is_time_synced()
-            ):
-
-                logger.info(
-                    "Pocket Option time synchronized."
-                )
-
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(0.25)
-
-    else:
-
-        raise RuntimeError(
-            "Connected, but server time was not synchronized."
-        )
-
-    client.subscribe(
-        ASSET,
-        period=CANDLE_PERIOD
-    )
-
-    logger.info(
-        "Subscribed: %s | %ss",
-        ASSET,
-        CANDLE_PERIOD
-    )
-
-    time.sleep(2)
-
-
-def connected():
-
-    if client is None:
-        return False
-
-    try:
-
-        return (
-            client.check_connect()
-            and
-            client.is_time_synced()
-        )
-
-    except Exception:
-
-        return False
-
-
-def reconnect():
-
-    global client
-
-    logger.warning(
-        "Reconnecting..."
-    )
-
-    try:
-
-        if client is not None:
-
-            client.disconnect_websocket()
-
-    except Exception:
-        pass
-
-    client = None
-
-    time.sleep(3)
-
-    connect()
 
 
 # ============================================================
-# CANDLE NORMALIZATION
+# TWELVE DATA
 # ============================================================
 
-def normalize_candles(data):
+def fetch_forex_candles():
 
-    if data is None:
+    if not TWELVE_DATA_API_KEY:
+
+        logger.error(
+            "TWELVE_DATA_API_KEY is missing."
+        )
+
         return None
 
-    if isinstance(data, pd.DataFrame):
+    params = {
 
-        df = data.copy()
+        "symbol":
+            SYMBOL,
 
-    else:
+        "interval":
+            INTERVAL,
 
-        try:
+        "outputsize":
+            OUTPUTSIZE,
 
-            df = pd.DataFrame(data)
+        "apikey":
+            TWELVE_DATA_API_KEY,
 
-        except Exception:
+        "format":
+            "JSON",
+
+        "timezone":
+            "UTC"
+    }
+
+    try:
+
+        response = requests.get(
+            TWELVE_DATA_URL,
+            params=params,
+            timeout=REQUEST_TIMEOUT
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        if "status" in data:
+
+            if data.get("status") == "error":
+
+                logger.error(
+                    "Twelve Data error: %s",
+                    data.get(
+                        "message",
+                        "unknown error"
+                    )
+                )
+
+                return None
+
+        if "code" in data:
+
+            logger.error(
+                "Twelve Data API error: %s",
+                data
+            )
 
             return None
 
-    if df.empty:
-        return None
+        values = data.get(
+            "values"
+        )
 
-    rename = {}
+        if not values:
 
-    for c in df.columns:
+            logger.warning(
+                "Twelve Data returned no candles."
+            )
 
-        name = str(c).lower().strip()
+            return None
 
-        if name in (
-            "time",
+        df = pd.DataFrame(
+            values
+        )
+
+        if df.empty:
+
+            return None
+
+        # ----------------------------------------------------
+        # Rename
+        # ----------------------------------------------------
+
+        rename = {
+
+            "datetime":
+                "timestamp",
+
+            "open":
+                "open",
+
+            "high":
+                "high",
+
+            "low":
+                "low",
+
+            "close":
+                "close",
+
+            "volume":
+                "volume"
+        }
+
+        df.rename(
+            columns=rename,
+            inplace=True
+        )
+
+        required = [
+
             "timestamp",
-            "at",
-            "date",
-            "created_at"
-        ):
-
-            rename[c] = "timestamp"
-
-        elif name in (
             "open",
-            "o"
-        ):
-
-            rename[c] = "open"
-
-        elif name in (
             "high",
-            "h",
-            "max"
-        ):
-
-            rename[c] = "high"
-
-        elif name in (
             "low",
-            "l",
-            "min"
-        ):
+            "close"
+        ]
 
-            rename[c] = "low"
+        for column in required:
 
-        elif name in (
-            "close",
-            "c"
-        ):
+            if column not in df.columns:
 
-            rename[c] = "close"
+                logger.error(
+                    "Missing Twelve Data column: %s",
+                    column
+                )
 
-    df.rename(
-        columns=rename,
-        inplace=True
-    )
+                return None
 
-    required = [
-        "timestamp",
-        "open",
-        "high",
-        "low",
-        "close"
-    ]
+        # ----------------------------------------------------
+        # Timestamp
+        # ----------------------------------------------------
 
-    if any(
-        c not in df.columns
-        for c in required
-    ):
-
-        return None
-
-    for c in [
-        "open",
-        "high",
-        "low",
-        "close"
-    ]:
-
-        df[c] = pd.to_numeric(
-            df[c],
+        df["timestamp"] = pd.to_datetime(
+            df["timestamp"],
+            utc=True,
             errors="coerce"
         )
 
-    df["timestamp"] = pd.to_numeric(
-        df["timestamp"],
-        errors="coerce"
-    )
-
-    if (
-        df["timestamp"]
-        .dropna()
-        .empty
-    ):
-
-        return None
-
-    if (
-        df["timestamp"]
-        .dropna()
-        .median()
-        > 10_000_000_000
-    ):
-
-        df["timestamp"] /= 1000
-
-    df.dropna(
-        subset=required,
-        inplace=True
-    )
-
-    df.sort_values(
-        "timestamp",
-        inplace=True
-    )
-
-    df.drop_duplicates(
-        "timestamp",
-        keep="last",
-        inplace=True
-    )
-
-    return df.reset_index(
-        drop=True
-    )
-
-
-# ============================================================
-# REAL POCKET OPTION CANDLES
-# ============================================================
-
-def fetch_candles():
-
-    if not connected():
-        return None
-
-    try:
-
-        raw = client.get_historical_candles(
-            ASSET,
-            period=CANDLE_PERIOD,
-            offset=45000,
-            count_request=1
+        df.dropna(
+            subset=[
+                "timestamp"
+            ],
+            inplace=True
         )
 
-        return normalize_candles(raw)
+        df["timestamp"] = (
+            df["timestamp"]
+            .astype("int64")
+            // 10**9
+        )
+
+        # ----------------------------------------------------
+        # Numeric
+        # ----------------------------------------------------
+
+        for column in [
+            "open",
+            "high",
+            "low",
+            "close"
+        ]:
+
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
+
+        if "volume" in df.columns:
+
+            df["volume"] = pd.to_numeric(
+                df["volume"],
+                errors="coerce"
+            )
+
+        # ----------------------------------------------------
+        # Clean
+        # ----------------------------------------------------
+
+        df.dropna(
+            subset=[
+                "open",
+                "high",
+                "low",
+                "close"
+            ],
+            inplace=True
+        )
+
+        df = df[
+            (df["high"] >= df["open"]) &
+            (df["high"] >= df["close"]) &
+            (df["low"] <= df["open"]) &
+            (df["low"] <= df["close"])
+        ]
+
+        df.sort_values(
+            "timestamp",
+            inplace=True
+        )
+
+        df.drop_duplicates(
+            subset=[
+                "timestamp"
+            ],
+            keep="last",
+            inplace=True
+        )
+
+        df.reset_index(
+            drop=True,
+            inplace=True
+        )
+
+        if len(df) < MIN_CANDLES:
+
+            logger.warning(
+                "Only %s candles received. "
+                "Need at least %s.",
+                len(df),
+                MIN_CANDLES
+            )
+
+            return None
+
+        return df
+
+    except requests.RequestException as e:
+
+        logger.error(
+            "Twelve Data HTTP error: %s",
+            e
+        )
+
+        return None
 
     except Exception as e:
 
-        logger.error(
+        logger.exception(
             "Candle fetch error: %s",
             e
         )
@@ -660,37 +708,46 @@ def fetch_candles():
         return None
 
 
-def closed_candles(df):
+# ============================================================
+# CLOSED CANDLES ONLY
+# ============================================================
 
-    df = normalize_candles(df)
+def get_closed_candles(
+    df
+):
 
     if df is None:
         return None
 
-    try:
+    if df.empty:
+        return None
 
-        server_time = float(
-            client.get_server_timestamp()
-        )
+    df = df.copy()
 
-    except Exception:
-
-        server_time = time.time()
+    now = utc_now_timestamp()
 
     current_bucket = (
-        int(server_time)
-        // CANDLE_PERIOD
-    ) * CANDLE_PERIOD
+        now // 60
+    ) * 60
+
+    # --------------------------------------------------------
+    # Remove currently forming minute.
+    #
+    # Only candles strictly before the current minute
+    # are considered closed.
+    # --------------------------------------------------------
 
     df = df[
         df["timestamp"]
-        < current_bucket
+        <
+        current_bucket
     ].copy()
 
     if len(df) < MIN_CANDLES:
 
-        logger.info(
-            "Waiting for candles: %s/%s",
+        logger.warning(
+            "Closed candles=%s, "
+            "minimum=%s",
             len(df),
             MIN_CANDLES
         )
@@ -698,7 +755,7 @@ def closed_candles(df):
         return None
 
     return df.tail(
-        HISTORY_CANDLES
+        OUTPUTSIZE
     ).reset_index(
         drop=True
     )
@@ -708,7 +765,10 @@ def closed_candles(df):
 # INDICATORS
 # ============================================================
 
-def rsi(series, period=14):
+def calculate_rsi(
+    series,
+    period=14
+):
 
     delta = series.diff()
 
@@ -738,7 +798,7 @@ def rsi(series, period=14):
         )
     )
 
-    value = (
+    rsi = (
         100 -
         (
             100 /
@@ -746,39 +806,100 @@ def rsi(series, period=14):
         )
     )
 
-    return value.fillna(50)
+    return rsi.fillna(50)
 
 
-def indicators(df):
+def calculate_atr(
+    df,
+    period=14
+):
 
-    d = df.copy()
+    high = df["high"]
 
-    close = d["close"]
+    low = df["low"]
 
-    d["ema5"] = close.ewm(
-        span=5,
-        adjust=False
+    close = df["close"]
+
+    previous_close = close.shift(1)
+
+    tr = pd.concat(
+        [
+
+            high - low,
+
+            (
+                high -
+                previous_close
+            ).abs(),
+
+            (
+                low -
+                previous_close
+            ).abs()
+
+        ],
+        axis=1
+    ).max(
+        axis=1
+    )
+
+    return tr.rolling(
+        period
     ).mean()
 
-    d["ema9"] = close.ewm(
-        span=9,
-        adjust=False
-    ).mean()
 
-    d["ema21"] = close.ewm(
-        span=21,
-        adjust=False
-    ).mean()
+def calculate_indicators(
+    df
+):
 
-    d["ema50"] = close.ewm(
-        span=50,
-        adjust=False
-    ).mean()
+    result = df.copy()
 
-    d["rsi"] = rsi(
+    close = result["close"]
+
+    # --------------------------------------------------------
+    # EMA
+    # --------------------------------------------------------
+
+    result["ema_5"] = (
+        close.ewm(
+            span=5,
+            adjust=False
+        ).mean()
+    )
+
+    result["ema_9"] = (
+        close.ewm(
+            span=9,
+            adjust=False
+        ).mean()
+    )
+
+    result["ema_21"] = (
+        close.ewm(
+            span=21,
+            adjust=False
+        ).mean()
+    )
+
+    result["ema_50"] = (
+        close.ewm(
+            span=50,
+            adjust=False
+        ).mean()
+    )
+
+    # --------------------------------------------------------
+    # RSI
+    # --------------------------------------------------------
+
+    result["rsi"] = calculate_rsi(
         close,
         14
     )
+
+    # --------------------------------------------------------
+    # MACD
+    # --------------------------------------------------------
 
     ema12 = close.ewm(
         span=12,
@@ -790,13 +911,13 @@ def indicators(df):
         adjust=False
     ).mean()
 
-    d["macd"] = (
+    result["macd"] = (
         ema12 -
         ema26
     )
 
-    d["macd_signal"] = (
-        d["macd"]
+    result["macd_signal"] = (
+        result["macd"]
         .ewm(
             span=9,
             adjust=False
@@ -804,39 +925,55 @@ def indicators(df):
         .mean()
     )
 
-    d["macd_hist"] = (
-        d["macd"] -
-        d["macd_signal"]
+    result["macd_hist"] = (
+        result["macd"] -
+        result["macd_signal"]
     )
 
-    middle = (
+    # --------------------------------------------------------
+    # Bollinger
+    # --------------------------------------------------------
+
+    result["bb_middle"] = (
         close
         .rolling(20)
         .mean()
     )
 
-    std = (
+    result["bb_std"] = (
         close
         .rolling(20)
         .std()
     )
 
-    d["bb_middle"] = middle
-    d["bb_upper"] = (
-        middle + 2 * std
-    )
-    d["bb_lower"] = (
-        middle - 2 * std
+    result["bb_upper"] = (
+        result["bb_middle"] +
+        (
+            2 *
+            result["bb_std"]
+        )
     )
 
+    result["bb_lower"] = (
+        result["bb_middle"] -
+        (
+            2 *
+            result["bb_std"]
+        )
+    )
+
+    # --------------------------------------------------------
+    # Stochastic
+    # --------------------------------------------------------
+
     lowest = (
-        d["low"]
+        result["low"]
         .rolling(14)
         .min()
     )
 
     highest = (
-        d["high"]
+        result["high"]
         .rolling(14)
         .max()
     )
@@ -849,456 +986,805 @@ def indicators(df):
         np.nan
     )
 
-    d["stoch_k"] = (
+    result["stoch_k"] = (
         100 *
-        (close - lowest) /
+        (
+            close -
+            lowest
+        ) /
         denominator
     )
 
-    d["stoch_d"] = (
-        d["stoch_k"]
+    result["stoch_d"] = (
+        result["stoch_k"]
         .rolling(3)
         .mean()
     )
 
-    previous_close = close.shift(1)
+    # --------------------------------------------------------
+    # ATR
+    # --------------------------------------------------------
 
-    tr = pd.concat(
-        [
-            d["high"] - d["low"],
-            (
-                d["high"] -
-                previous_close
-            ).abs(),
-            (
-                d["low"] -
-                previous_close
-            ).abs()
-        ],
-        axis=1
-    ).max(axis=1)
-
-    d["atr"] = (
-        tr.rolling(14).mean()
+    result["atr"] = calculate_atr(
+        result,
+        14
     )
 
-    d["momentum"] = (
+    # --------------------------------------------------------
+    # Momentum
+    # --------------------------------------------------------
+
+    result["momentum"] = (
         close -
         close.shift(4)
     )
 
-    return (
-        d.replace(
-            [np.inf, -np.inf],
+    # --------------------------------------------------------
+    # ROC
+    # --------------------------------------------------------
+
+    result["roc"] = (
+        close.pct_change(
+            periods=5
+        ) *
+        100
+    )
+
+    # --------------------------------------------------------
+    # Candle body
+    # --------------------------------------------------------
+
+    result["candle_body"] = (
+        result["close"] -
+        result["open"]
+    )
+
+    result["candle_range"] = (
+        result["high"] -
+        result["low"]
+    )
+
+    result["body_ratio"] = (
+        result["candle_body"].abs() /
+        result["candle_range"].replace(
+            0,
             np.nan
         )
-        .dropna()
-        .reset_index(drop=True)
     )
 
+    # --------------------------------------------------------
+    # Trend slope
+    # --------------------------------------------------------
+
+    result["ema21_slope"] = (
+        result["ema_21"] -
+        result["ema_21"].shift(3)
+    )
+
+    # --------------------------------------------------------
+    # Remove invalid rows
+    # --------------------------------------------------------
+
+    result.replace(
+        [np.inf, -np.inf],
+        np.nan,
+        inplace=True
+    )
+
+    result.dropna(
+        inplace=True
+    )
+
+    result.reset_index(
+        drop=True,
+        inplace=True
+    )
+
+    return result
+
 
 # ============================================================
-# 9 CONFIRMATIONS
+# SIGNAL ENGINE
 # ============================================================
 
-def get_votes(df):
+def analyze_market(
+    df
+):
 
-    d = indicators(df)
-
-    if d is None or len(d) < 50:
+    if df is None:
         return None
 
-    last = d.iloc[-1]
-    prev = d.iloc[-2]
+    if len(df) < MIN_CANDLES:
+        return None
 
-    votes = {}
-
-    # 1 EMA
-    if (
-        last.ema5 >
-        last.ema9 >
-        last.ema21 >
-        last.ema50
-    ):
-
-        votes["EMA Trend"] = "CALL"
-
-    elif (
-        last.ema5 <
-        last.ema9 <
-        last.ema21 <
-        last.ema50
-    ):
-
-        votes["EMA Trend"] = "PUT"
-
-    else:
-
-        votes["EMA Trend"] = "NEUTRAL"
-
-    # 2 RSI
-    if (
-        50 < last.rsi < 68
-        and
-        last.rsi > prev.rsi
-    ):
-
-        votes["RSI"] = "CALL"
-
-    elif (
-        32 < last.rsi < 50
-        and
-        last.rsi < prev.rsi
-    ):
-
-        votes["RSI"] = "PUT"
-
-    else:
-
-        votes["RSI"] = "NEUTRAL"
-
-    # 3 MACD
-    if (
-        last.macd >
-        last.macd_signal
-        and
-        last.macd_hist > 0
-    ):
-
-        votes["MACD"] = "CALL"
-
-    elif (
-        last.macd <
-        last.macd_signal
-        and
-        last.macd_hist < 0
-    ):
-
-        votes["MACD"] = "PUT"
-
-    else:
-
-        votes["MACD"] = "NEUTRAL"
-
-    # 4 Bollinger
-    if (
-        last.close >
-        last.bb_middle
-        and
-        last.close <
-        last.bb_upper
-    ):
-
-        votes["Bollinger"] = "CALL"
-
-    elif (
-        last.close <
-        last.bb_middle
-        and
-        last.close >
-        last.bb_lower
-    ):
-
-        votes["Bollinger"] = "PUT"
-
-    else:
-
-        votes["Bollinger"] = "NEUTRAL"
-
-    # 5 Stochastic
-    if (
-        last.stoch_k >
-        last.stoch_d
-        and
-        last.stoch_k < 80
-    ):
-
-        votes["Stochastic"] = "CALL"
-
-    elif (
-        last.stoch_k <
-        last.stoch_d
-        and
-        last.stoch_k > 20
-    ):
-
-        votes["Stochastic"] = "PUT"
-
-    else:
-
-        votes["Stochastic"] = "NEUTRAL"
-
-    # 6 Momentum
-    if (
-        last.momentum > 0
-        and
-        last.close > last.open
-    ):
-
-        votes["Momentum"] = "CALL"
-
-    elif (
-        last.momentum < 0
-        and
-        last.close < last.open
-    ):
-
-        votes["Momentum"] = "PUT"
-
-    else:
-
-        votes["Momentum"] = "NEUTRAL"
-
-    # 7 Candle
-    body = abs(
-        last.close -
-        last.open
+    data = calculate_indicators(
+        df
     )
 
-    candle_range = (
-        last.high -
-        last.low
-    )
+    if data is None:
+        return None
 
-    ratio = (
-        body / candle_range
-        if candle_range > 0
-        else 0
-    )
+    if len(data) < 60:
+        return None
 
-    if (
-        last.close > last.open
-        and
-        ratio >= 0.55
-    ):
+    last = data.iloc[-1]
 
-        votes[
-            "Candle Confirmation"
-        ] = "CALL"
+    previous = data.iloc[-2]
 
-    elif (
-        last.close < last.open
-        and
-        ratio >= 0.55
-    ):
+    call_score = 0
+    put_score = 0
 
-        votes[
-            "Candle Confirmation"
-        ] = "PUT"
+    confirmations = []
 
-    else:
-
-        votes[
-            "Candle Confirmation"
-        ] = "NEUTRAL"
-
-    # 8 Support / Resistance
-    high20 = (
-        d.high.tail(20).max()
-    )
-
-    low20 = (
-        d.low.tail(20).min()
-    )
-
-    distance_low = (
-        last.close - low20
-    )
-
-    distance_high = (
-        high20 - last.close
-    )
+    # ========================================================
+    # 1. EMA STRUCTURE
+    # ========================================================
 
     if (
-        distance_low >
-        distance_high
-        and
-        last.close >
-        last.ema21
+        last["ema_9"] >
+        last["ema_21"] >
+        last["ema_50"]
     ):
 
-        votes[
-            "Support/Resistance"
-        ] = "CALL"
+        call_score += 12
+
+        confirmations.append(
+            "EMA Trend: CALL"
+        )
 
     elif (
-        distance_high >
-        distance_low
-        and
-        last.close <
-        last.ema21
+        last["ema_9"] <
+        last["ema_21"] <
+        last["ema_50"]
     ):
 
-        votes[
-            "Support/Resistance"
-        ] = "PUT"
+        put_score += 12
 
-    else:
-
-        votes[
-            "Support/Resistance"
-        ] = "NEUTRAL"
-
-    # 9 Trend strength
-    if last.atr > 0:
-
-        strength = (
-            abs(
-                last.ema21 -
-                last.ema50
-            )
-            /
-            last.atr
+        confirmations.append(
+            "EMA Trend: PUT"
         )
 
     else:
 
-        strength = 0
+        confirmations.append(
+            "EMA Trend: NEUTRAL"
+        )
+
+    # ========================================================
+    # 2. EMA MOMENTUM
+    # ========================================================
 
     if (
-        strength > 0.8
+        last["ema_21"] >
+        previous["ema_21"]
         and
-        last.ema21 >
-        last.ema50
+        last["ema_9"] >
+        previous["ema_9"]
     ):
 
-        votes[
-            "Trend Strength"
-        ] = "CALL"
+        call_score += 8
+
+        confirmations.append(
+            "EMA Momentum: CALL"
+        )
 
     elif (
-        strength > 0.8
+        last["ema_21"] <
+        previous["ema_21"]
         and
-        last.ema21 <
-        last.ema50
+        last["ema_9"] <
+        previous["ema_9"]
     ):
 
-        votes[
-            "Trend Strength"
-        ] = "PUT"
+        put_score += 8
+
+        confirmations.append(
+            "EMA Momentum: PUT"
+        )
 
     else:
 
-        votes[
-            "Trend Strength"
-        ] = "NEUTRAL"
+        confirmations.append(
+            "EMA Momentum: NEUTRAL"
+        )
 
-    return votes
+    # ========================================================
+    # 3. RSI
+    # ========================================================
 
-
-def strong_signal(df):
-
-    votes = get_votes(df)
-
-    if votes is None:
-        return None
-
-    call = sum(
-        v == "CALL"
-        for v in votes.values()
+    rsi = float(
+        last["rsi"]
     )
 
-    put = sum(
-        v == "PUT"
-        for v in votes.values()
+    if (
+        52 <= rsi <= 68
+        and
+        rsi > previous["rsi"]
+    ):
+
+        call_score += 10
+
+        confirmations.append(
+            f"RSI: CALL ({rsi:.1f})"
+        )
+
+    elif (
+        32 <= rsi <= 48
+        and
+        rsi < previous["rsi"]
+    ):
+
+        put_score += 10
+
+        confirmations.append(
+            f"RSI: PUT ({rsi:.1f})"
+        )
+
+    else:
+
+        confirmations.append(
+            f"RSI: NEUTRAL ({rsi:.1f})"
+        )
+
+    # ========================================================
+    # 4. MACD
+    # ========================================================
+
+    if (
+        last["macd"] >
+        last["macd_signal"]
+        and
+        last["macd_hist"] >
+        0
+        and
+        last["macd_hist"] >
+        previous["macd_hist"]
+    ):
+
+        call_score += 12
+
+        confirmations.append(
+            "MACD: CALL"
+        )
+
+    elif (
+        last["macd"] <
+        last["macd_signal"]
+        and
+        last["macd_hist"] <
+        0
+        and
+        last["macd_hist"] <
+        previous["macd_hist"]
+    ):
+
+        put_score += 12
+
+        confirmations.append(
+            "MACD: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "MACD: NEUTRAL"
+        )
+
+    # ========================================================
+    # 5. BOLLINGER
+    # ========================================================
+
+    if (
+        last["close"] >
+        last["bb_middle"]
+        and
+        last["close"] <
+        last["bb_upper"]
+    ):
+
+        call_score += 8
+
+        confirmations.append(
+            "Bollinger: CALL"
+        )
+
+    elif (
+        last["close"] <
+        last["bb_middle"]
+        and
+        last["close"] >
+        last["bb_lower"]
+    ):
+
+        put_score += 8
+
+        confirmations.append(
+            "Bollinger: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "Bollinger: NEUTRAL"
+        )
+
+    # ========================================================
+    # 6. STOCHASTIC
+    # ========================================================
+
+    k = float(
+        last["stoch_k"]
+    )
+
+    d = float(
+        last["stoch_d"]
+    )
+
+    previous_k = float(
+        previous["stoch_k"]
+    )
+
+    previous_d = float(
+        previous["stoch_d"]
+    )
+
+    if (
+        k > d
+        and
+        previous_k <= previous_d
+        and
+        k < 80
+    ):
+
+        call_score += 10
+
+        confirmations.append(
+            "Stochastic: CALL"
+        )
+
+    elif (
+        k < d
+        and
+        previous_k >= previous_d
+        and
+        k > 20
+    ):
+
+        put_score += 10
+
+        confirmations.append(
+            "Stochastic: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "Stochastic: NEUTRAL"
+        )
+
+    # ========================================================
+    # 7. MOMENTUM
+    # ========================================================
+
+    if (
+        last["momentum"] > 0
+        and
+        last["roc"] > 0
+    ):
+
+        call_score += 10
+
+        confirmations.append(
+            "Momentum: CALL"
+        )
+
+    elif (
+        last["momentum"] < 0
+        and
+        last["roc"] < 0
+    ):
+
+        put_score += 10
+
+        confirmations.append(
+            "Momentum: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "Momentum: NEUTRAL"
+        )
+
+    # ========================================================
+    # 8. CANDLE CONFIRMATION
+    # ========================================================
+
+    body_ratio = float(
+        last["body_ratio"]
+    )
+
+    if (
+        last["close"] >
+        last["open"]
+        and
+        body_ratio >= 0.60
+    ):
+
+        call_score += 10
+
+        confirmations.append(
+            "Candle: CALL"
+        )
+
+    elif (
+        last["close"] <
+        last["open"]
+        and
+        body_ratio >= 0.60
+    ):
+
+        put_score += 10
+
+        confirmations.append(
+            "Candle: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "Candle: NEUTRAL"
+        )
+
+    # ========================================================
+    # 9. TREND STRENGTH / ATR
+    # ========================================================
+
+    atr = float(
+        last["atr"]
+    )
+
+    ema_distance = abs(
+        last["ema_21"] -
+        last["ema_50"]
+    )
+
+    if (
+        atr > 0
+        and
+        ema_distance / atr >= 0.50
+        and
+        last["ema_21"] >
+        last["ema_50"]
+        and
+        last["ema21_slope"] > 0
+    ):
+
+        call_score += 10
+
+        confirmations.append(
+            "Trend Strength: CALL"
+        )
+
+    elif (
+        atr > 0
+        and
+        ema_distance / atr >= 0.50
+        and
+        last["ema_21"] <
+        last["ema_50"]
+        and
+        last["ema21_slope"] < 0
+    ):
+
+        put_score += 10
+
+        confirmations.append(
+            "Trend Strength: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "Trend Strength: NEUTRAL"
+        )
+
+    # ========================================================
+    # 10. SUPPORT / RESISTANCE
+    # ========================================================
+
+    recent_high = (
+        data["high"]
+        .tail(30)
+        .max()
+    )
+
+    recent_low = (
+        data["low"]
+        .tail(30)
+        .min()
+    )
+
+    price = float(
+        last["close"]
+    )
+
+    total_range = (
+        recent_high -
+        recent_low
+    )
+
+    if total_range > 0:
+
+        position = (
+            price -
+            recent_low
+        ) / total_range
+
+    else:
+
+        position = 0.5
+
+    if (
+        position > 0.50
+        and
+        price > last["ema_21"]
+    ):
+
+        call_score += 10
+
+        confirmations.append(
+            "Structure: CALL"
+        )
+
+    elif (
+        position < 0.50
+        and
+        price < last["ema_21"]
+    ):
+
+        put_score += 10
+
+        confirmations.append(
+            "Structure: PUT"
+        )
+
+    else:
+
+        confirmations.append(
+            "Structure: NEUTRAL"
+        )
+
+    # ========================================================
+    # FINAL SCORE
+    # ========================================================
+
+    maximum_possible = 110
+
+    if call_score > put_score:
+
+        direction = "CALL"
+
+        raw_score = call_score
+
+    elif put_score > call_score:
+
+        direction = "PUT"
+
+        raw_score = put_score
+
+    else:
+
+        logger.info(
+            "Market is tied. No signal."
+        )
+
+        return None
+
+    # Convert to 100-point scale
+    score = (
+        raw_score /
+        maximum_possible
+    ) * 100
+
+    score = round(
+        score,
+        2
+    )
+
+    edge = abs(
+        call_score -
+        put_score
     )
 
     logger.info(
-        "Confirmations: CALL=%s PUT=%s",
-        call,
-        put
+        "Market analysis | "
+        "CALL=%s PUT=%s SCORE=%s EDGE=%s",
+        call_score,
+        put_score,
+        score,
+        edge
     )
 
-    if (
-        call >= MIN_CONFIRMATIONS
-        and
-        call > put
-    ):
+    # ========================================================
+    # STRICT FILTER
+    # ========================================================
 
-        return {
-            "direction": "CALL",
-            "votes": call,
-            "strategies": votes
-        }
+    if score < MIN_SCORE:
 
-    if (
-        put >= MIN_CONFIRMATIONS
-        and
-        put > call
-    ):
+        logger.info(
+            "No signal: score %.2f < %s",
+            score,
+            MIN_SCORE
+        )
 
-        return {
-            "direction": "PUT",
-            "votes": put,
-            "strategies": votes
-        }
+        return None
 
-    return None
+    if edge < MIN_SCORE_EDGE:
+
+        logger.info(
+            "No signal: score edge %s < %s",
+            edge,
+            MIN_SCORE_EDGE
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # Additional trend sanity filter
+    # --------------------------------------------------------
+
+    if direction == "CALL":
+
+        if not (
+            last["ema_9"] >
+            last["ema_21"]
+        ):
+
+            logger.info(
+                "CALL rejected by trend filter."
+            )
+
+            return None
+
+    else:
+
+        if not (
+            last["ema_9"] <
+            last["ema_21"]
+        ):
+
+            logger.info(
+                "PUT rejected by trend filter."
+            )
+
+            return None
+
+    return {
+
+        "direction":
+            direction,
+
+        "score":
+            score,
+
+        "call_score":
+            call_score,
+
+        "put_score":
+            put_score,
+
+        "edge":
+            edge,
+
+        "strategies":
+            confirmations,
+
+        "signal_candle_timestamp":
+            int(
+                last["timestamp"]
+            ),
+
+        "reference_price":
+            float(
+                last["close"]
+            )
+    }
 
 
 # ============================================================
 # CHART
 # ============================================================
 
-def make_chart(
+def generate_chart(
     df,
     title,
-    direction=None,
-    marker_timestamp=None
+    signal_direction=None
 ):
 
     try:
 
-        d = df.tail(60).copy()
+        chart_df = (
+            df.tail(70)
+            .copy()
+        )
 
-        if d.empty:
+        if chart_df.empty:
+
             return None
 
         fig, ax = plt.subplots(
-            figsize=(12, 6),
+            figsize=(13, 7),
             dpi=140
         )
 
         times = [
+
             datetime.fromtimestamp(
-                float(x),
-                tz=TURKEY_TZ
+                float(ts),
+                tz=timezone.utc
             )
-            for x in d.timestamp
+
+            for ts in chart_df[
+                "timestamp"
+            ]
         ]
 
-        xs = mdates.date2num(
+        x_values = mdates.date2num(
             times
         )
 
-        if len(xs) > 1:
+        if len(x_values) > 1:
 
-            width = (
+            candle_width = (
                 np.median(
-                    np.diff(xs)
-                ) * 0.75
+                    np.diff(
+                        x_values
+                    )
+                )
+                *
+                0.72
             )
 
         else:
 
-            width = 0.0005
+            candle_width = 0.0004
+
+        # ----------------------------------------------------
+        # Candles
+        # ----------------------------------------------------
 
         for i, (_, row) in enumerate(
-            d.iterrows()
+            chart_df.iterrows()
         ):
 
-            x = xs[i]
+            x = x_values[i]
 
-            o = float(row.open)
-            h = float(row.high)
-            l = float(row.low)
-            c = float(row.close)
-
-            candle_color = (
-                "#00c878"
-                if c >= o
-                else "#ff3344"
+            o = float(
+                row["open"]
             )
+
+            h = float(
+                row["high"]
+            )
+
+            l = float(
+                row["low"]
+            )
+
+            c = float(
+                row["close"]
+            )
+
+            if c >= o:
+
+                candle_color = "#16a34a"
+
+            else:
+
+                candle_color = "#dc2626"
+
+            # Wick
 
             ax.plot(
                 [x, x],
@@ -1307,120 +1793,144 @@ def make_chart(
                 linewidth=1
             )
 
+            # Body
+
             rect = Rectangle(
+
                 (
-                    x - width / 2,
+                    x -
+                    candle_width / 2,
+
                     min(o, c)
                 ),
-                width,
+
+                candle_width,
+
                 max(
                     abs(c - o),
-                    1e-8
+                    0.000001
                 ),
+
                 facecolor=candle_color,
+
                 edgecolor=candle_color
             )
 
-            ax.add_patch(rect)
+            ax.add_patch(
+                rect
+            )
 
-        if marker_timestamp is not None:
+        # ----------------------------------------------------
+        # EMA lines
+        # ----------------------------------------------------
 
-            found = d[
-                d.timestamp ==
-                marker_timestamp
-            ]
+        indicator_df = calculate_indicators(
+            chart_df
+        )
 
-            if not found.empty:
+        if (
+            indicator_df is not None
+            and
+            not indicator_df.empty
+        ):
 
-                row = found.iloc[0]
+            indicator_times = [
 
-                x = mdates.date2num(
-                    datetime.fromtimestamp(
-                        float(marker_timestamp),
-                        tz=TURKEY_TZ
-                    )
+                datetime.fromtimestamp(
+                    float(ts),
+                    tz=timezone.utc
                 )
 
-                if direction == "CALL":
+                for ts in indicator_df[
+                    "timestamp"
+                ]
+            ]
 
-                    ax.annotate(
-                        "CALL",
-                        xy=(x, row.high),
-                        xytext=(
-                            x,
-                            row.high +
-                            (
-                                row.high -
-                                row.low
-                            ) * 1.5
-                        ),
-                        ha="center",
-                        fontweight="bold",
-                        arrowprops={
-                            "arrowstyle": "->"
-                        }
-                    )
+            indicator_x = (
+                mdates.date2num(
+                    indicator_times
+                )
+            )
 
-                else:
+            ax.plot(
+                indicator_x,
+                indicator_df[
+                    "ema_9"
+                ],
+                linewidth=1.1,
+                label="EMA 9"
+            )
 
-                    ax.annotate(
-                        "PUT",
-                        xy=(x, row.low),
-                        xytext=(
-                            x,
-                            row.low -
-                            (
-                                row.high -
-                                row.low
-                            ) * 1.5
-                        ),
-                        ha="center",
-                        fontweight="bold",
-                        arrowprops={
-                            "arrowstyle": "->"
-                        }
-                    )
+            ax.plot(
+                indicator_x,
+                indicator_df[
+                    "ema_21"
+                ],
+                linewidth=1.1,
+                label="EMA 21"
+            )
+
+            ax.plot(
+                indicator_x,
+                indicator_df[
+                    "ema_50"
+                ],
+                linewidth=1.1,
+                label="EMA 50"
+            )
 
         ax.set_title(
-            f"{ASSET_NAME} | {title}",
+            f"{SYMBOL_NAME} | {title}",
+            fontsize=14,
             fontweight="bold"
+        )
+
+        ax.set_ylabel(
+            "Price"
         )
 
         ax.grid(
             True,
             linestyle="--",
-            alpha=0.3
+            alpha=0.30
         )
 
         ax.xaxis.set_major_formatter(
             mdates.DateFormatter(
-                "%H:%M:%S",
-                tz=TURKEY_TZ
+                "%H:%M",
+                tz=timezone.utc
             )
         )
 
+        ax.legend(
+            loc="upper left"
+        )
+
         fig.autofmt_xdate()
+
         plt.tight_layout()
 
-        path = (
-            f"eurusd_otc_"
+        file_path = (
+            "eurusd_real_"
             f"{int(time.time())}.png"
         )
 
         plt.savefig(
-            path,
+            file_path,
             dpi=140,
             bbox_inches="tight"
         )
 
-        plt.close(fig)
+        plt.close(
+            fig
+        )
 
-        return path
+        return file_path
 
     except Exception as e:
 
-        logger.error(
-            "Chart error: %s",
+        logger.exception(
+            "Chart generation error: %s",
             e
         )
 
@@ -1431,210 +1941,385 @@ def make_chart(
 # SIGNAL MESSAGE
 # ============================================================
 
-def signal_message(
-    signal,
-    df
+def build_signal_message(
+    signal
 ):
 
-    candle_ts = int(
-        df.iloc[-1].timestamp
-    )
-
-    entry_ts = (
-        candle_ts +
-        CANDLE_PERIOD
-    )
-
-    expiry_ts = (
-        entry_ts +
-        CANDLE_PERIOD
-    )
-
-    entry = datetime.fromtimestamp(
-        entry_ts,
-        tz=TURKEY_TZ
-    )
-
-    expiry = datetime.fromtimestamp(
-        expiry_ts,
-        tz=TURKEY_TZ
-    )
-
-    direction = (
-        "🟢 CALL / UP"
-        if signal["direction"] == "CALL"
-        else
-        "🔴 PUT / DOWN"
-    )
-
-    lines = [
-
-        "🎯 <b>EUR/USD OTC</b>",
-        "",
-        "📡 المصدر: Pocket Option",
-        "🕯️ شموع حقيقية مغلقة فقط",
-        "🚫 لا توجد شموع وهمية",
-        "",
-        f"🚀 الاتجاه: <b>{direction}</b>",
-        f"⭐ التأكيدات: <b>{signal['votes']}/9</b>",
-        "",
-        f"⏰ الدخول: <b>{entry:%H:%M:%S}</b>",
-        f"🏁 الانتهاء: <b>{expiry:%H:%M:%S}</b>",
-        "⏱️ المدة: 1 دقيقة",
-        "",
-        f"💵 السعر المرجعي: "
-        f"{float(df.iloc[-1].close):.5f}",
-        "",
-        "📊 <b>التأكيدات</b>"
-    ]
-
-    for name, vote in signal[
-        "strategies"
-    ].items():
-
-        icon = (
-            "🟢"
-            if vote == "CALL"
-            else
-            "🔴"
-            if vote == "PUT"
-            else
-            "⚪"
-        )
-
-        lines.append(
-            f"{icon} {name}: {vote}"
-        )
-
-    lines.extend(
-        [
-            "",
-            "🛡️ بدون مضاعفات",
-            "🤖 التنفيذ الآلي: متوقف",
-            "",
-            "⚠️ إشارة تحليلية وليست ضمانًا للربح."
+    signal_candle = (
+        signal[
+            "signal_candle_timestamp"
         ]
     )
 
-    return (
-        "\n".join(lines),
-        entry_ts,
-        expiry_ts,
-        float(df.iloc[-1].close)
+    # --------------------------------------------------------
+    # Signal is based on the last closed candle.
+    #
+    # The next candle begins exactly 60 seconds later.
+    # --------------------------------------------------------
+
+    entry_timestamp = (
+        signal_candle +
+        SIGNAL_LEAD_SECONDS
     )
+
+    expiry_timestamp = (
+        entry_timestamp +
+        TRADE_DURATION_SECONDS
+    )
+
+    direction = signal[
+        "direction"
+    ]
+
+    if direction == "CALL":
+
+        direction_text = (
+            "🟢 CALL / UP"
+        )
+
+    else:
+
+        direction_text = (
+            "🔴 PUT / DOWN"
+        )
+
+    signal_time = format_time(
+        signal_candle
+    )
+
+    entry_time = format_time(
+        entry_timestamp
+    )
+
+    expiry_time = format_time(
+        expiry_timestamp
+    )
+
+    message_lines = [
+
+        "🎯 <b>EUR/USD — REAL FOREX</b>",
+
+        "",
+
+        "📡 <b>مصدر البيانات:</b> "
+        "Forex market data",
+
+        "🕯️ <b>الفريم:</b> "
+        "1 دقيقة",
+
+        "🚫 <b>OTC:</b> لا",
+
+        "🚫 <b>شموع وهمية:</b> لا",
+
+        "",
+
+        f"🚀 <b>الإشارة:</b> "
+        f"{direction_text}",
+
+        f"⭐ <b>قوة الإشارة:</b> "
+        f"{signal['score']:.1f}/100",
+
+        f"📊 <b>CALL Score:</b> "
+        f"{signal['call_score']}",
+
+        f"📊 <b>PUT Score:</b> "
+        f"{signal['put_score']}",
+
+        "",
+
+        f"🕯️ <b>الشمعة المحللة:</b> "
+        f"{signal_time}",
+
+        f"🔔 <b>بداية الصفقة:</b> "
+        f"{entry_time}",
+
+        f"🏁 <b>انتهاء الصفقة:</b> "
+        f"{expiry_time}",
+
+        "⏱️ <b>مدة الصفقة:</b> "
+        "دقيقتان",
+
+        "",
+
+        f"💵 <b>السعر المرجعي:</b> "
+        f"{signal['reference_price']:.5f}",
+
+        "",
+
+        "🧠 <b>التأكيدات:</b>"
+    ]
+
+    for item in signal[
+        "strategies"
+    ]:
+
+        if "CALL" in item:
+
+            icon = "🟢"
+
+        elif "PUT" in item:
+
+            icon = "🔴"
+
+        else:
+
+            icon = "⚪"
+
+        message_lines.append(
+            f"{icon} {item}"
+        )
+
+    message_lines.extend([
+
+        "",
+
+        "🛡️ <b>بدون مضاعفات</b>",
+
+        "🤖 <b>التنفيذ الآلي:</b> متوقف",
+
+        "",
+
+        "⚠️ هذا تقييم فني آلي، "
+        "وليس ضمانًا للربح."
+    ])
+
+    return (
+        "\n".join(
+            message_lines
+        ),
+        entry_timestamp,
+        expiry_timestamp
+    )
+
+
+# ============================================================
+# WAIT
+# ============================================================
+
+async def wait_until(
+    timestamp
+):
+
+    while True:
+
+        remaining = (
+            timestamp -
+            time.time()
+        )
+
+        if remaining <= 0:
+
+            return
+
+        await asyncio.sleep(
+            min(
+                0.5,
+                max(
+                    0.05,
+                    remaining
+                )
+            )
+        )
+
+
+# ============================================================
+# GET ENTRY CANDLE
+# ============================================================
+
+def get_candle_by_timestamp(
+    df,
+    timestamp
+):
+
+    if df is None:
+        return None
+
+    if df.empty:
+        return None
+
+    matches = df[
+        df["timestamp"]
+        ==
+        int(timestamp)
+    ]
+
+    if matches.empty:
+        return None
+
+    return matches.iloc[0]
 
 
 # ============================================================
 # RESULT
 # ============================================================
 
-def result_for(
+def calculate_result(
     direction,
-    entry,
+    entry_price,
     exit_price
 ):
 
+    epsilon = 1e-8
+
+    difference = (
+        exit_price -
+        entry_price
+    )
+
     if abs(
-        exit_price - entry
-    ) < 1e-10:
+        difference
+    ) <= epsilon:
 
         return "TIE"
 
     if direction == "CALL":
 
-        return (
-            "WIN"
-            if exit_price > entry
-            else
-            "LOSS"
+        if difference > 0:
+
+            return "WIN"
+
+        return "LOSS"
+
+    if direction == "PUT":
+
+        if difference < 0:
+
+            return "WIN"
+
+        return "LOSS"
+
+    return "TIE"
+
+
+# ============================================================
+# WAIT AND CONFIRM TRADE RESULT
+# ============================================================
+
+async def confirm_trade_result(
+    entry_timestamp,
+    expiry_timestamp
+):
+
+    # --------------------------------------------------------
+    # Wait until the 2-minute trade has completely expired.
+    # --------------------------------------------------------
+
+    await wait_until(
+        expiry_timestamp +
+        RESULT_GRACE_SECONDS
+    )
+
+    for attempt in range(
+        1,
+        9
+    ):
+
+        try:
+
+            raw_df = await asyncio.to_thread(
+                fetch_forex_candles
+            )
+
+            df = get_closed_candles(
+                raw_df
+            )
+
+            if df is None:
+
+                await asyncio.sleep(
+                    3
+                )
+
+                continue
+
+            # ------------------------------------------------
+            # Entry candle:
+            # starts at entry_timestamp
+            #
+            # Its OPEN is used as entry price.
+            # ------------------------------------------------
+
+            entry_candle = (
+                get_candle_by_timestamp(
+                    df,
+                    entry_timestamp
+                )
+            )
+
+            # ------------------------------------------------
+            # Expiry candle:
+            # the second candle of the 2-minute period
+            #
+            # starts at entry + 60 seconds.
+            # Its CLOSE is the expiry price.
+            # ------------------------------------------------
+
+            expiry_candle_timestamp = (
+                entry_timestamp +
+                60
+            )
+
+            expiry_candle = (
+                get_candle_by_timestamp(
+                    df,
+                    expiry_candle_timestamp
+                )
+            )
+
+            if (
+                entry_candle is not None
+                and
+                expiry_candle is not None
+            ):
+
+                entry_price = float(
+                    entry_candle[
+                        "open"
+                    ]
+                )
+
+                exit_price = float(
+                    expiry_candle[
+                        "close"
+                    ]
+                )
+
+                logger.info(
+                    "Trade result prices | "
+                    "ENTRY=%.5f EXIT=%.5f",
+                    entry_price,
+                    exit_price
+                )
+
+                return (
+                    entry_price,
+                    exit_price,
+                    df
+                )
+
+            logger.info(
+                "Result attempt %s: "
+                "required candles not available yet.",
+                attempt
+            )
+
+        except Exception as e:
+
+            logger.warning(
+                "Result attempt %s failed: %s",
+                attempt,
+                e
+            )
+
+        await asyncio.sleep(
+            3
         )
 
     return (
-        "WIN"
-        if exit_price < entry
-        else
-        "LOSS"
+        None,
+        None,
+        None
     )
-
-
-# ============================================================
-# RESULT FETCH
-# ============================================================
-
-def get_exit_price(
-    df,
-    entry_timestamp
-):
-
-    if df is None:
-        return None
-
-    d = normalize_candles(df)
-
-    if d is None:
-        return None
-
-    rows = d[
-        d.timestamp ==
-        float(entry_timestamp)
-    ]
-
-    if rows.empty:
-        return None
-
-    return float(
-        rows.iloc[0].close
-    )
-
-
-async def wait_result(
-    entry_timestamp
-):
-
-    expiry = (
-        entry_timestamp +
-        CANDLE_PERIOD
-    )
-
-    while (
-        time.time()
-        <
-        expiry +
-        RESULT_GRACE_SECONDS
-    ):
-
-        await asyncio.sleep(
-            0.5
-        )
-
-    for attempt in range(8):
-
-        raw = await asyncio.to_thread(
-            fetch_candles
-        )
-
-        df = closed_candles(
-            raw
-        )
-
-        price = get_exit_price(
-            df,
-            entry_timestamp
-        )
-
-        if price is not None:
-
-            return df, price
-
-        logger.info(
-            "Waiting for result candle... "
-            "attempt %s/8",
-            attempt + 1
-        )
-
-        await asyncio.sleep(3)
-
-    return None, None
 
 
 # ============================================================
@@ -1657,144 +2342,558 @@ def send_result(
     if result == "WIN":
 
         total_wins += 1
-        label = "WIN 🟢"
+
+        result_text = (
+            "WIN 🟢"
+        )
 
     elif result == "LOSS":
 
         total_losses += 1
-        label = "LOSS 🔴"
+
+        result_text = (
+            "LOSS 🔴"
+        )
 
     else:
 
         total_ties += 1
-        label = "TIE ⚪"
+
+        result_text = (
+            "TIE ⚪"
+        )
 
     save_stats()
 
-    expiry = datetime.fromtimestamp(
-        expiry_timestamp,
-        tz=TURKEY_TZ
+    completed = (
+        total_wins +
+        total_losses +
+        total_ties
     )
 
     message = (
 
-        "📊 <b>نتيجة EUR/USD OTC</b>\n\n"
+        "📊 <b>نتيجة EUR/USD REAL FOREX</b>\n\n"
 
-        f"🚀 الإشارة: "
+        f"🚀 <b>الإشارة:</b> "
         f"{signal['direction']}\n"
 
-        f"🏁 النتيجة: <b>{label}</b>\n\n"
+        f"⭐ <b>Score:</b> "
+        f"{signal['score']:.1f}/100\n\n"
 
-        f"💵 الدخول: "
+        f"🏁 <b>النتيجة:</b> "
+        f"<b>{result_text}</b>\n\n"
+
+        f"💵 <b>سعر الدخول:</b> "
         f"{entry_price:.5f}\n"
 
-        f"🏁 الإغلاق: "
-        f"{exit_price:.5f}\n"
+        f"🏁 <b>سعر الانتهاء:</b> "
+        f"{exit_price:.5f}\n\n"
 
-        f"⏰ الانتهاء: "
-        f"{expiry:%H:%M:%S}\n\n"
+        f"⏰ <b>الانتهاء:</b> "
+        f"{format_time(expiry_timestamp)}\n\n"
 
         "📈 <b>الإحصائيات</b>\n"
 
         f"🟢 WIN: {total_wins}\n"
+
         f"🔴 LOSS: {total_losses}\n"
+
         f"⚪ TIE: {total_ties}\n"
-        f"🔢 الإشارات: {total_signals}\n"
-        f"🎯 الفوز: {win_rate():.2f}%"
+
+        f"🔢 إجمالي الإشارات: "
+        f"{total_signals}\n"
+
+        f"📊 الصفقات المكتملة: "
+        f"{completed}\n"
+
+        f"🎯 نسبة الفوز: "
+        f"{get_win_rate():.2f}%\n\n"
+
+        "🛡️ <b>بدون مضاعفات</b>"
     )
 
-    path = make_chart(
+    chart_path = generate_chart(
         result_df,
         f"RESULT {result}"
     )
 
-    if path:
+    if chart_path:
 
-        telegram_photo(
-            path,
+        sent = send_telegram_photo(
+            chart_path,
             message
         )
 
         try:
-            os.remove(path)
+
+            os.remove(
+                chart_path
+            )
+
         except OSError:
             pass
 
-    else:
+        return sent
 
-        telegram_message(
-            message
-        )
+    return send_telegram_message(
+        message
+    )
 
 
 # ============================================================
 # START MESSAGE
 # ============================================================
 
-def start_message():
+def send_start_message():
 
-    telegram_message(
+    message = (
 
-        "🤖 <b>بوت EUR/USD OTC بدأ</b>\n\n"
+        "🤖 <b>EUR/USD REAL FOREX BOT</b>\n\n"
 
-        "📡 المصدر: Pocket Option\n"
-        "🕯️ شموع مغلقة حقيقية فقط\n"
-        "🚫 الشموع الوهمية: متوقفة\n"
-        "📊 الفريم: 1 دقيقة\n"
-        "🎯 الحد الأدنى: 7/9\n"
-        "⏱️ مدة الصفقة: 1 دقيقة\n"
-        "🛡️ بدون مضاعفات\n"
-        "🤖 التنفيذ الآلي: متوقف\n\n"
+        "✅ <b>السوق:</b> Forex الحقيقي\n"
 
-        "⏳ <b>البوت يراقب الآن...</b>"
+        "💱 <b>الزوج:</b> EUR/USD\n"
+
+        "🕯️ <b>الفريم:</b> 1 دقيقة\n"
+
+        "⏱️ <b>مدة الصفقة:</b> دقيقتان\n"
+
+        "🔔 <b>التنبيه:</b> قبل بداية الصفقة "
+        "بدقيقة كاملة\n"
+
+        f"⭐ <b>أقل Score:</b> "
+        f"{MIN_SCORE}/100\n"
+
+        "🚫 <b>OTC:</b> متوقف\n"
+
+        "🚫 <b>شموع وهمية:</b> متوقفة\n"
+
+        "🛡️ <b>المضاعفات:</b> متوقفة\n"
+
+        "📸 <b>الشارت:</b> نعم\n"
+
+        "📊 <b>النتائج:</b> WIN / LOSS / TIE\n\n"
+
+        "⏳ <b>البوت بدأ مراقبة EUR/USD...</b>"
+    )
+
+    send_telegram_message(
+        message
     )
 
 
 # ============================================================
-# MAIN
+# VALIDATE CONFIG
+# ============================================================
+
+def validate_config():
+
+    errors = []
+
+    if not TWELVE_DATA_API_KEY:
+
+        errors.append(
+            "TWELVE_DATA_API_KEY"
+        )
+
+    if not TELEGRAM_BOT_TOKEN:
+
+        errors.append(
+            "TELEGRAM_BOT_TOKEN"
+        )
+
+    if not TELEGRAM_CHAT_ID:
+
+        errors.append(
+            "TELEGRAM_CHAT_ID"
+        )
+
+    if errors:
+
+        raise RuntimeError(
+            "Missing required environment variables: "
+            +
+            ", ".join(errors)
+        )
+
+
+# ============================================================
+# TEST DATA CONNECTION
+# ============================================================
+
+def test_data_connection():
+
+    logger.info(
+        "Testing EUR/USD real Forex data..."
+    )
+
+    df = fetch_forex_candles()
+
+    if df is None:
+
+        raise RuntimeError(
+            "Could not receive EUR/USD "
+            "Forex candles from Twelve Data."
+        )
+
+    closed = get_closed_candles(
+        df
+    )
+
+    if closed is None:
+
+        raise RuntimeError(
+            "Received data, but there are "
+            "not enough closed candles."
+        )
+
+    latest = closed.iloc[-1]
+
+    logger.info(
+        "Data connection OK | "
+        "Closed candles=%s | "
+        "Latest=%s | Close=%.5f",
+        len(closed),
+        format_datetime(
+            latest["timestamp"]
+        ),
+        float(
+            latest["close"]
+        )
+    )
+
+    return closed
+
+
+# ============================================================
+# PROCESS ONE SIGNAL
+# ============================================================
+
+async def process_signal(
+    signal,
+    df
+):
+
+    global total_signals
+
+    (
+        message,
+        entry_timestamp,
+        expiry_timestamp
+    ) = build_signal_message(
+        signal
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # Signal is generated from a closed candle.
+    # The next candle begins exactly 60 seconds later.
+    # Therefore this message is the "one minute before"
+    # notification for that future trade candle.
+    # --------------------------------------------------------
+
+    now = time.time()
+
+    remaining = (
+        entry_timestamp -
+        now
+    )
+
+    logger.info(
+        "Signal timing | "
+        "entry=%s | remaining=%.1fs",
+        format_time(
+            entry_timestamp
+        ),
+        remaining
+    )
+
+    # If the system is too late, do not send a bad signal.
+
+    if remaining < 45:
+
+        logger.warning(
+            "Signal arrived too late "
+            "(%.1f seconds before entry). "
+            "Skipping.",
+            remaining
+        )
+
+        return
+
+    # If somehow the signal is too early due to API timing,
+    # wait until exactly 60 seconds before entry.
+
+    if remaining > 65:
+
+        await wait_until(
+            entry_timestamp -
+            60
+        )
+
+    # Recalculate.
+
+    remaining = (
+        entry_timestamp -
+        time.time()
+    )
+
+    if (
+        remaining < 45
+        or
+        remaining > 65
+    ):
+
+        logger.warning(
+            "Signal timing invalid after synchronization. "
+            "Skipping."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # Count
+    # --------------------------------------------------------
+
+    total_signals += 1
+
+    save_stats()
+
+    logger.info(
+        "================================================"
+    )
+
+    logger.info(
+        "STRONG SIGNAL | %s | SCORE %.1f/100",
+        signal["direction"],
+        signal["score"]
+    )
+
+    logger.info(
+        "Entry: %s",
+        format_datetime(
+            entry_timestamp
+        )
+    )
+
+    logger.info(
+        "Expiry: %s",
+        format_datetime(
+            expiry_timestamp
+        )
+    )
+
+    logger.info(
+        "================================================"
+    )
+
+    # --------------------------------------------------------
+    # Chart
+    # --------------------------------------------------------
+
+    chart_path = generate_chart(
+
+        df,
+
+        (
+            f"{signal['direction']} "
+            f"| SCORE {signal['score']:.1f}/100"
+        ),
+
+        signal_direction=
+            signal["direction"]
+    )
+
+    if chart_path:
+
+        send_telegram_photo(
+            chart_path,
+            message
+        )
+
+        try:
+
+            os.remove(
+                chart_path
+            )
+
+        except OSError:
+            pass
+
+    else:
+
+        send_telegram_message(
+            message
+        )
+
+    # --------------------------------------------------------
+    # Wait until expiry and get result
+    # --------------------------------------------------------
+
+    (
+        entry_price,
+        exit_price,
+        result_df
+    ) = await confirm_trade_result(
+
+        entry_timestamp,
+
+        expiry_timestamp
+    )
+
+    # --------------------------------------------------------
+    # Result unavailable
+    # --------------------------------------------------------
+
+    if (
+        entry_price is None
+        or
+        exit_price is None
+        or
+        result_df is None
+    ):
+
+        send_telegram_message(
+
+            "⚠️ <b>تعذر تأكيد نتيجة "
+            "EUR/USD</b>\n\n"
+
+            f"🚀 الإشارة: "
+            f"{signal['direction']}\n"
+
+            f"⭐ Score: "
+            f"{signal['score']:.1f}/100\n\n"
+
+            "❌ لم تصل شموع فترة انتهاء "
+            "الصفقة بشكل مؤكد من مصدر البيانات.\n\n"
+
+            "🛡️ <b>لم يتم احتساب WIN أو LOSS</b> "
+            "حتى لا يتم تسجيل نتيجة غير مؤكدة."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # Calculate
+    # --------------------------------------------------------
+
+    result = calculate_result(
+
+        signal["direction"],
+
+        entry_price,
+
+        exit_price
+    )
+
+    # --------------------------------------------------------
+    # Send
+    # --------------------------------------------------------
+
+    send_result(
+
+        signal,
+
+        entry_price,
+
+        exit_price,
+
+        expiry_timestamp,
+
+        result_df,
+
+        result
+    )
+
+
+# ============================================================
+# MAIN LOOP
 # ============================================================
 
 async def main():
 
-    global total_signals
     global last_processed_candle
 
+    validate_config()
+
     load_stats()
-    load_state()
 
-    if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN is missing."
-        )
+    logger.info(
+        "================================================"
+    )
 
-    if not TELEGRAM_CHAT_ID:
-        raise RuntimeError(
-            "TELEGRAM_CHAT_ID is missing."
-        )
+    logger.info(
+        "EUR/USD REAL FOREX SIGNAL BOT"
+    )
 
-    connect()
-    start_message()
+    logger.info(
+        "No OTC"
+    )
+
+    logger.info(
+        "No PO_SSID"
+    )
+
+    logger.info(
+        "No Pocket Option API"
+    )
+
+    logger.info(
+        "No fake candles"
+    )
+
+    logger.info(
+        "Trade duration = 2 minutes"
+    )
+
+    logger.info(
+        "Signal lead = 1 minute"
+    )
+
+    logger.info(
+        "Minimum score = %s/100",
+        MIN_SCORE
+    )
+
+    logger.info(
+        "================================================"
+    )
+
+    # --------------------------------------------------------
+    # Test
+    # --------------------------------------------------------
+
+    initial_df = test_data_connection()
+
+    # --------------------------------------------------------
+    # Telegram start
+    # --------------------------------------------------------
+
+    send_start_message()
+
+    # --------------------------------------------------------
+    # Main monitoring
+    # --------------------------------------------------------
 
     while True:
 
         try:
 
-            if not connected():
-
-                reconnect()
-
-            raw = await asyncio.to_thread(
-                fetch_candles
+            raw_df = await asyncio.to_thread(
+                fetch_forex_candles
             )
 
-            df = closed_candles(
-                raw
+            df = get_closed_candles(
+                raw_df
             )
 
             if df is None:
 
                 logger.info(
-                    "⏳ Waiting for real OTC candles..."
+                    "⏳ Waiting for real "
+                    "EUR/USD closed candles..."
                 )
 
                 await asyncio.sleep(
@@ -1803,227 +2902,14 @@ async def main():
 
                 continue
 
-            latest_ts = int(
-                df.iloc[-1].timestamp
+            latest = df.iloc[-1]
+
+            latest_timestamp = int(
+                latest["timestamp"]
             )
 
-            latest_dt = datetime.fromtimestamp(
-                latest_ts,
-                tz=TURKEY_TZ
+            latest_time = format_datetime(
+                latest_timestamp
             )
 
-            logger.info(
-                "Latest closed candle: %s",
-                latest_dt.strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-            )
-
-            if (
-                last_processed_candle
-                ==
-                latest_ts
-            ):
-
-                await asyncio.sleep(
-                    POLL_SECONDS
-                )
-
-                continue
-
-            signal = strong_signal(
-                df
-            )
-
-            last_processed_candle = (
-                latest_ts
-            )
-
-            save_state()
-
-            if signal is None:
-
-                logger.info(
-                    "No 7/9 signal."
-                )
-
-                await asyncio.sleep(
-                    POLL_SECONDS
-                )
-
-                continue
-
-            (
-                message,
-                entry_ts,
-                expiry_ts,
-                entry_price
-            ) = signal_message(
-                signal,
-                df
-            )
-
-            # لا نرسل إشارة إذا انتهى وقت الدخول.
-            try:
-
-                server_time = float(
-                    client.get_server_timestamp()
-                )
-
-            except Exception:
-
-                server_time = time.time()
-
-            if (
-                entry_ts -
-                server_time
-                <= 2
-            ):
-
-                logger.warning(
-                    "Signal too late. Skipping."
-                )
-
-                continue
-
-            total_signals += 1
-            save_stats()
-
-            logger.info(
-                "SIGNAL %s | %s/9",
-                signal["direction"],
-                signal["votes"]
-            )
-
-            path = make_chart(
-                df,
-                (
-                    f"{signal['direction']} "
-                    f"{signal['votes']}/9"
-                ),
-                direction=signal[
-                    "direction"
-                ],
-                marker_timestamp=latest_ts
-            )
-
-            if path:
-
-                telegram_photo(
-                    path,
-                    message
-                )
-
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-
-            else:
-
-                telegram_message(
-                    message
-                )
-
-            # انتظار نتيجة الشمعة التالية
-            result_df, exit_price = (
-                await wait_result(
-                    entry_ts
-                )
-            )
-
-            if (
-                result_df is None
-                or
-                exit_price is None
-            ):
-
-                telegram_message(
-
-                    "⚠️ <b>تعذر تأكيد نتيجة "
-                    "EUR/USD OTC</b>\n\n"
-
-                    f"الإشارة: "
-                    f"{signal['direction']}\n\n"
-
-                    "❌ لم تصل شمعة الإغلاق "
-                    "من مصدر Pocket Option.\n\n"
-
-                    "🛡️ لم يتم احتساب WIN/LOSS."
-                )
-
-                await asyncio.sleep(2)
-                continue
-
-            result = result_for(
-                signal["direction"],
-                entry_price,
-                exit_price
-            )
-
-            send_result(
-                signal,
-                entry_price,
-                exit_price,
-                expiry_ts,
-                result_df,
-                result
-            )
-
-            await asyncio.sleep(2)
-
-        except KeyboardInterrupt:
-
-            break
-
-        except Exception as e:
-
-            logger.exception(
-                "Main loop error"
-            )
-
-            try:
-
-                telegram_message(
-                    "⚠️ <b>خطأ مؤقت في البوت</b>\n\n"
-                    f"<code>{str(e)[:700]}</code>\n\n"
-                    "🔄 ستتم محاولة إعادة الاتصال."
-                )
-
-            except Exception:
-                pass
-
-            await asyncio.sleep(10)
-
-            try:
-
-                if not connected():
-                    reconnect()
-
-            except Exception as reconnect_error:
-
-                logger.error(
-                    "Reconnect error: %s",
-                    reconnect_error
-                )
-
-                await asyncio.sleep(10)
-
-    try:
-
-        if client is not None:
-            client.disconnect_websocket()
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# START
-# ============================================================
-
-if __name__ == "__main__":
-
-    asyncio.run(
-        main()
-    )
+            logger
