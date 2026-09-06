@@ -10,10 +10,17 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
+# استيراد مكتبة الاتصال بمنصة بوكت أوشن
+from pocketoptionapi.stable_api import PocketOption
+
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 CHAT_ID = "-1003151787212"
+
+# بيانات الدخول لحسابك في بوكت أوشن (يمكن وضعها هنا أو كـ Secrets في جيثب)
+EMAIL = "YOUR_EMAIL_HERE"
+PASSWORD = "YOUR_PASSWORD_HERE"
 
 def send_telegram_message(text):
     try:
@@ -33,7 +40,7 @@ def send_telegram_photo(photo_bytes, caption=""):
         data.write(f'\r\n--{boundary}\r\n'.encode('utf-8'))
         data.write(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}'.encode('utf-8'))
         data.write(f'\r\n--{boundary}\r\n'.encode('utf-8'))
-        data.write(f'Content-Disposition: form-data; name="photo"; filename="pocket_otc.png"\r\n'.encode('utf-8'))
+        data.write(f'Content-Disposition: form-data; name="photo"; filename="pocket_live.png"\r\n'.encode('utf-8'))
         data.write(f'Content-Type: image/png\r\n\r\n'.encode('utf-8'))
         data.write(photo_bytes)
         data.write(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
@@ -46,37 +53,30 @@ def get_turkey_time():
     turkey_tz = timezone(timedelta(hours=3))
     return datetime.now(turkey_tz)
 
-def get_pocket_otc_simulation_data():
-    """محاكاة دقيقة 100% لحركة شمعات بوكت أوشن OTC بناءً على السعر الحالي الظاهر في صورتك (1.1808)"""
-    np.random.seed(int(time.time() // 30)) # تثبيت النسق للحظات لتتوافق مع حركة المنصة
-    
-    # نقطة البداية مطابقة لسعرك الحالي في المنصة
-    base_price = 1.1815
-    
-    # بناء حركة شمعات تشبه تماماً الصعود القوي ثم الهبوط القوي الظاهر في صورتك
-    steps = 40
-    trend = np.sin(np.linspace(0, 3.5, steps)) * 0.0015
-    noise = np.random.normal(0, 0.0002, steps)
-    closes = base_price + np.cumsum(trend + noise)
-    
-    df = pd.DataFrame()
-    df['close'] = closes
-    df['open'] = df['close'].shift(1).fillna(base_price)
-    df['high'] = df[['open', 'close']].max(axis=1) + np.random.uniform(0.0001, 0.0003, steps)
-    df['low'] = df[['open', 'close']].min(axis=1) - np.random.uniform(0.0001, 0.0003, steps)
-    
-    # مؤشرات الدقة
-    df['EMA_Fast'] = df['close'].ewm(span=5).mean()
-    df['EMA_Slow'] = df['close'].ewm(span=12).mean()
-    
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    df['RSI'] = df['RSI'].fillna(50)
-    
-    return df
+def fetch_real_pocket_candles(api_client, asset="EURUSD_otc"):
+    """جلب الشموع الحقيقية المباشرة من منصة بوكت أوشن للـ OTC"""
+    try:
+        # طلب الشموع بفريم 5 دقائق (300 ثانية)
+        candles = api_client.get_candles(asset, 300)
+        df = pd.DataFrame(candles)
+        # تنسيق الأعمدة حسب ما ترد من المنصة
+        if 'open' not in df.columns and 'o' in df.columns:
+            df = df.rename(columns={'o': 'open', 'c': 'close', 'h': 'high', 'l': 'low'})
+        
+        # حساب المؤشرات الفنية بدقة على الشموع الحقيقية
+        df['EMA_Fast'] = df['close'].ewm(span=5).mean()
+        df['EMA_Slow'] = df['close'].ewm(span=12).mean()
+        
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        df['RSI'] = df['RSI'].fillna(50)
+        return df
+    except Exception as e:
+        logging.error(f"Error fetching real candles: {e}")
+        return None
 
 def check_multiple_strategies(df):
     last_row = df.iloc[-1]
@@ -137,11 +137,26 @@ total_losses = 0
 
 def main():
     global total_wins, total_losses
-    send_telegram_message("بسم الله الرحمن الرحيم نبدأ عمل أبو خالد 🚀\n(بوت توصيات بوكت أوشن OTC - متوافق كلياً مع حركة المنصة)")
+    send_telegram_message("بسم الله الرحمن الرحيم - بدء ربط البوت المباشر بمنصة بوكت أوشن OTC 🚀")
     
+    # الاتصال بالمنصة
+    api = PocketOption(EMAIL, PASSWORD)
+    api.connect()
+    
+    if not api.check_connect():
+        send_telegram_message("❌ فشل الاتصال المباشر بمنصة بوكت أوشن، يرجى التحقق من البريد وكلمة المرور.")
+        return
+
+    send_telegram_message("✅ تم الاتصال بنجاح بسيرفرات بوكت أوشن OTC. البوت يعمل الآن بشكل مستمر ودائم.")
+
     while True:
         try:
-            df = get_pocket_otc_simulation_data()
+            # جلب البيانات الحقيقية للزوج EURUSD_otc
+            df = fetch_real_pocket_candles(api, "EURUSD_otc")
+            if df is None or len(df) == 0:
+                time.sleep(30)
+                continue
+                
             signal = check_multiple_strategies(df)
             
             now_tr = get_turkey_time()
@@ -151,23 +166,23 @@ def main():
             chart_img = generate_pocket_option_style_chart(df, f"EUR/USD OTC | Signal: {signal}")
             
             alert_msg = (
-                f"⚠️ تنبيه صفقة قادمة (OTC)\n"
+                f"⚠️ تنبيه صفقة قادمة (منصة Pocket Option حقيقي)\n"
                 f"──────────────────\n"
                 f"💱 الزوج: EUR/USD OTC\n"
                 f"📈 الاتجاه: {signal} ({'صعود 🟢' if signal=='CALL' else 'هبوط 🔴'})\n"
                 f"⏳ وقت الدخول (تركيا): {entry_time.strftime('%H:%M:%S')}\n"
                 f"⏱ مدة الصفقة: 5 دقائق\n"
                 f"──────────────────\n"
-                f"📊 شارت حركة الشموع المطابق تماماً لبوكت أوشن"
+                f"📊 شارت حقيقي مسحوب مباشرة من المنصة"
             )
             
             send_telegram_photo(chart_img, caption=alert_msg)
             
-            # الانتظار لمدة 7 دقائق (دقيقتين قبل الدخول + 5 دقائق عمر الصفقة)
+            # الانتظار حتى تنتهي الصفقة (7 دقائق)
             time.sleep(420)
             
-            # تقييم النتيجة بدقة وفقاً لحركة السوق المطابقة
-            df_end = get_pocket_otc_simulation_data()
+            # جلب السعر بعد الانتهاء للتقييم الحقيقي
+            df_end = fetch_real_pocket_candles(api, "EURUSD_otc")
             end_price = df_end['close'].iloc[-1]
             
             if signal == "CALL":
@@ -186,7 +201,7 @@ def main():
             chart_img_after = generate_pocket_option_style_chart(df_end, f"Result: {result_text}")
             
             summary_msg = (
-                f"🏁 نتيجة صفقة EUR/USD OTC\n"
+                f"🏁 نتيجة صفقة EUR/USD OTC الحقيقية\n"
                 f"──────────────────\n"
                 f"النتيجة: {result_text}\n"
                 f"⏰ وقت الانتهاء (تركيا): {end_tr.strftime('%H:%M:%S')}\n"
@@ -200,7 +215,7 @@ def main():
             time.sleep(60)
             
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Error in main loop: {e}")
             time.sleep(30)
 
 if __name__ == "__main__":
