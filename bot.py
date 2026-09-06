@@ -1,35 +1,18 @@
-import os
 import time
 import logging
-from flask import Flask
-from threading import Thread
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # لمنع فتح واجهة رسومية على السيرفر
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 import urllib.request
 import urllib.parse
-import json
 
 # إعداد السجلات
 logging.basicConfig(level=logging.INFO)
 
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running 24/7!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# === إعدادات التيليجرام (تمت الإضافة بنجاح) ===
+# === إعدادات التيليجرام ===
 TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
 CHAT_ID = "-1003151787212"
 
@@ -47,7 +30,6 @@ def send_telegram_photo(photo_bytes, caption=""):
         boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW'
         data = io.BytesIO()
         
-        # تجهيز الطلب لإرسال الصورة كملف بايتس
         data.write(f'--{boundary}\r\n'.encode('utf-8'))
         data.write(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{CHAT_ID}'.encode('utf-8'))
         data.write(f'\r\n--{boundary}\r\n'.encode('utf-8'))
@@ -63,17 +45,14 @@ def send_telegram_photo(photo_bytes, caption=""):
     except Exception as e:
         logging.error(f"Telegram Photo Error: {e}")
 
-# === محاكاة جلب بيانات السوق والتحليل الفني متعدد الاستراتيجيات ===
 def get_market_data():
     np.random.seed(int(time.time() % 100))
     prices = 1.0800 + np.cumsum(np.random.normal(0, 0.0002, 50))
     df = pd.DataFrame({'close': prices})
     
-    # حساب المؤشرات الفنية للاستراتيجيات المتعددة
     df['EMA_Fast'] = df['close'].ewm(span=5).mean()
     df['EMA_Slow'] = df['close'].ewm(span=12).mean()
     
-    # مؤشر RSI
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -88,10 +67,8 @@ def check_multiple_strategies(df):
     ema_fast = last_row['EMA_Fast']
     ema_slow = last_row['EMA_Slow']
     
-    # شروط إجماع استراتيجية الصعود (CALL)
     if ema_fast > ema_slow and 50 < rsi < 70:
         return "CALL"
-    # شروط إجماع استراتيجية الهبوط (PUT)
     elif ema_fast < ema_slow and 30 < rsi < 50:
         return "PUT"
     
@@ -111,33 +88,29 @@ def generate_chart_image(df, title):
     plt.close()
     return buf.read()
 
-# === إحصائيات الصفقات ===
 total_wins = 0
 total_losses = 0
 
 def main_loop():
     global total_wins, total_losses
-    send_telegram_message("🚀 تم تشغيل بوت التوصيات متعدد الاستراتيجيات بنجاح وهو يعمل الآن على مدار الساعة (24/7).")
+    send_telegram_message("🚀 تم تشغيل بوت التوصيات متعدد الاستراتيجيات بنجاح عبر جيت هب وهو جاهز لمراقبة السوق.")
     
-    while True:
+    # حلقة مراقبة السوق
+    for _ in range(5):  # لفحص السوق عدة مرات في التشغيل الواحد
         try:
             logging.info("Analyzing market with multiple strategies...")
             df = get_market_data()
             signal = check_multiple_strategies(df)
             
             if signal:
-                # 1. إرسال تنبيه مبكر قبل دخول الصفقة
                 send_telegram_message(f"⚠️ تنبيه مبكر: تم رصد إجماع للاستراتيجيات لزوج EUR/USD ({signal}). تجهّز خلال دقيقتين!")
-                time.sleep(120)
+                time.sleep(10) # تقليل الانتظار مؤقتاً للاختبار السريع
                 
-                # التقاط صورة البيانات قبل الصفقة
                 img_before = generate_chart_image(df, f"Before Entry: {signal}")
                 send_telegram_photo(img_before, caption=f"📊 البيانات قبل دخول صفقة (5 دقائق): {signal}")
                 
-                # محاكاة مدة الصفقة (5 دقائق)
-                time.sleep(300)
+                time.sleep(15) # محاكاة مدة الصفقة
                 
-                # تقييم النتيجة
                 is_win = np.random.choice([True, False], p=[0.6, 0.4])
                 if is_win:
                     total_wins += 1
@@ -158,14 +131,13 @@ def main_loop():
                 )
                 send_telegram_photo(img_after, caption=summary_msg)
             
-            time.sleep(120)
+            time.sleep(30)
             
         except Exception as e:
-            error_msg = f"⚠️ تحذير: توقف البوت بسبب خطأ طارئ: {str(e)}"
+            error_msg = f"⚠️ تحذير: خطأ طارئ: {str(e)}"
             send_telegram_message(error_msg)
             logging.error(error_msg)
-            time.sleep(60)
+            break
 
 if __name__ == "__main__":
-    keep_alive()
     main_loop()
