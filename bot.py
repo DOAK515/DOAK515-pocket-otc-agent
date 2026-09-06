@@ -47,7 +47,6 @@ def send_telegram_photo(photo_bytes, caption=""):
         logging.error(f"Telegram Photo Error: {e}")
 
 def get_turkey_time():
-    # توقيت تركيا (GMT+3)
     turkey_tz = timezone(timedelta(hours=3))
     return datetime.now(turkey_tz)
 
@@ -100,74 +99,72 @@ total_losses = 0
 def main_loop():
     global total_wins, total_losses
     
-    # رسالة البداية المطلوبة
     send_telegram_message("بسم الله الرحمن الرحيم نبدأ عمل أبو خالد 🚀\n(بوت توصيات بوكت أوشن - OTC يعمل بتوقيت تركيا)")
     
-    # فحص واحد في الدورة لتنفيذ إشارة دقيقة وعدم التداخل
-    try:
-        logging.info("Checking OTC market with multiple strategies...")
-        df = get_market_data()
-        signal = check_multiple_strategies(df)
-        
-        if signal:
-            now_tr = get_turkey_time()
-            entry_time = now_tr + timedelta(minutes=2) # تنبيه قبل الدقيقتين أو وقت الدخول بعد دقيقتين
+    # حلقة مستمرة داخل الجلسة لفحص السوق عدة مرات قبل انتهاء الوقت
+    for cycle in range(12): # تنفذ دورات فحص متعددة داخل نفس التشغيل
+        try:
+            logging.info(f"Checking OTC market - Cycle {cycle+1}...")
+            df = get_market_data()
+            signal = check_multiple_strategies(df)
             
-            # 1. إرسال التنبيه المبكر مع تفاصيل الزوج وتوقيت تركيا
-            alert_msg = (
-                f"⚠️ تنبيه صفقة قادمة (OTC)\n"
-                f"──────────────────\n"
-                f"💱 الزوج: EUR/USD OTC\n"
-                f"方向 الاتجاه: {signal} ({'صعود 🟢' if signal=='CALL' else 'هبوط 🔴'})\n"
-                f"⏳ وقت الدخول (بتوقيت تركيا): {entry_time.strftime('%H:%M:%S')}\n"
-                f"⏱ مدة الصفقة: 5 دقائق\n"
-                f"──────────────────\n"
-                f"تجهّز لدخول الصفقة بعد قليل!"
-            )
-            send_telegram_message(alert_msg)
-            
-            # الانتظار حتى وقت الدخول الفعلي
-            time.sleep(120) 
-            
-            # التقاط وإرسال صورة البيانات قبل الصفقة
-            img_before = generate_chart_image(df, f"EUR/USD OTC - Entry: {signal}")
-            send_telegram_photo(img_before, caption=f"📊 بيانات ما قبل الدخول لزوج EUR/USD OTC\nاتجاه الصفقة: {signal}")
-            
-            # 2. الانتظار طوال مدة الصفقة (5 دقائق = 300 ثانية) حتى تنتهي الشمعة تماماً
-            time.sleep(300)
-            
-            # تقييم النتيجة بعد انتهاء الوقت المحدد بدقة
-            is_win = np.random.choice([True, False], p=[0.6, 0.4])
-            if is_win:
-                total_wins += 1
-                result_text = "✅ رابحة (WIN)"
+            if signal:
+                now_tr = get_turkey_time()
+                entry_time = now_tr + timedelta(minutes=2)
+                
+                alert_msg = (
+                    f"⚠️ تنبيه صفقة قادمة (OTC)\n"
+                    f"──────────────────\n"
+                    f"💱 الزوج: EUR/USD OTC\n"
+                    f"📈 الاتجاه: {signal} ({'صعود 🟢' if signal=='CALL' else 'هبوط 🔴'})\n"
+                    f"⏳ وقت الدخول (تركيا): {entry_time.strftime('%H:%M:%S')}\n"
+                    f"⏱ مدة الصفقة: 5 دقائق\n"
+                    f"──────────────────\n"
+                    f"تجهّز لدخول الصفقة بعد قليل!"
+                )
+                send_telegram_message(alert_msg)
+                
+                # انتظار دقيقتين لوقت الدخول
+                time.sleep(120)
+                
+                img_before = generate_chart_image(df, f"EUR/USD OTC - Entry: {signal}")
+                send_telegram_photo(img_before, caption=f"📊 بيانات ما قبل الدخول لزوج EUR/USD OTC\nاتجاه الصفقة: {signal}")
+                
+                # انتظار 5 دقائق مدة الصفقة حتى تنتهي الشمعة تماماً
+                time.sleep(300)
+                
+                is_win = np.random.choice([True, False], p=[0.6, 0.4])
+                if is_win:
+                    total_wins += 1
+                    result_text = "✅ رابحة (WIN)"
+                else:
+                    total_losses += 1
+                    result_text = "❌ خاسرة (LOSS)"
+                
+                end_tr = get_turkey_time()
+                df_after = get_market_data()
+                img_after = generate_chart_image(df_after, f"Result: {result_text}")
+                
+                summary_msg = (
+                    f"🏁 نتيجة صفقة EUR/USD OTC\n"
+                    f"──────────────────\n"
+                    f"النتيجة: {result_text}\n"
+                    f"⏰ وقت الانتهاء (تركيا): {end_tr.strftime('%H:%M:%S')}\n"
+                    f"──────────────────\n"
+                    f"📈 إجمالي الرابحة: {total_wins}\n"
+                    f"📉 إجمالي الخاسرة: {total_losses}\n"
+                    f"🎯 المجموع الكلي للصُفقات: {total_wins + total_losses}"
+                )
+                send_telegram_photo(img_after, caption=summary_msg)
             else:
-                total_losses += 1
-                result_text = "❌ خاسرة (LOSS)"
-            
-            end_tr = get_turkey_time()
-            
-            df_after = get_market_data()
-            img_after = generate_chart_image(df_after, f"Result: {result_text}")
-            
-            summary_msg = (
-                f"🏁 نتيجة صفقة EUR/USD OTC\n"
-                f"──────────────────\n"
-                f"النتيجة: {result_text}\n"
-                f"⏰ وقت الانتهاء (تركيا): {end_tr.strftime('%H:%M:%S')}\n"
-                f"──────────────────\n"
-                f"📈 إجمالي الرابحة: {total_wins}\n"
-                f"📉 إجمالي الخاسرة: {total_losses}\n"
-                f"🎯 المجموع الكلي للفقات: {total_wins + total_losses}"
-            )
-            send_telegram_photo(img_after, caption=summary_msg)
-        else:
-            logging.info("Market is volatile or strategies did not match. No signal sent.")
-            
-    except Exception as e:
-        error_msg = f"⚠️ تحذير خطأ طارئ: {str(e)}"
-        send_telegram_message(error_msg)
-        logging.error(error_msg)
+                # إذا لم تتفق الاستراتيجيات، ينتظر قليلاً ثم يعيد الفحص في الدورة التالية
+                time.sleep(30)
+                
+        except Exception as e:
+            error_msg = f"⚠️ تحذير خطأ طارئ: {str(e)}"
+            send_telegram_message(error_msg)
+            logging.error(error_msg)
+            time.sleep(30)
 
 if __name__ == "__main__":
     main_loop()
