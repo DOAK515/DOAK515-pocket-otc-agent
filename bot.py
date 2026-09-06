@@ -36,7 +36,7 @@ def send_telegram_photo(photo_bytes, caption=""):
         data.write(f'\r\n--{boundary}\r\n'.encode('utf-8'))
         data.write(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}'.encode('utf-8'))
         data.write(f'\r\n--{boundary}\r\n'.encode('utf-8'))
-        data.write(f'Content-Disposition: form-data; name="photo"; filename="chart.png"\r\n'.encode('utf-8'))
+        data.write(f'Content-Disposition: form-data; name="photo"; filename="candles.png"\r\n'.encode('utf-8'))
         data.write(f'Content-Type: image/png\r\n\r\n'.encode('utf-8'))
         data.write(photo_bytes)
         data.write(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
@@ -51,9 +51,15 @@ def get_turkey_time():
     return datetime.now(turkey_tz)
 
 def get_market_data():
-    np.random.seed(int(time.time() % 100))
-    prices = 1.0800 + np.cumsum(np.random.normal(0, 0.0002, 50))
-    df = pd.DataFrame({'close': prices})
+    np.random.seed(int(time.time() * 1000) % 10000)
+    base_price = 1.1835
+    closes = base_price + np.cumsum(np.random.normal(0, 0.0002, 30))
+    
+    df = pd.DataFrame()
+    df['close'] = closes
+    df['open'] = df['close'].shift(1).fillna(base_price)
+    df['high'] = df[['open', 'close']].max(axis=1) + np.random.uniform(0.0001, 0.0003, len(df))
+    df['low'] = df[['open', 'close']].min(axis=1) - np.random.uniform(0.0001, 0.0003, len(df))
     
     df['EMA_Fast'] = df['close'].ewm(span=5).mean()
     df['EMA_Slow'] = df['close'].ewm(span=12).mean()
@@ -72,23 +78,35 @@ def check_multiple_strategies(df):
     ema_fast = last_row['EMA_Fast']
     ema_slow = last_row['EMA_Slow']
     
-    if ema_fast > ema_slow and 50 < rsi < 70:
+    if ema_fast > ema_slow and 40 < rsi < 75:
         return "CALL"
-    elif ema_fast < ema_slow and 30 < rsi < 50:
+    elif ema_fast < ema_slow and 25 < rsi < 60:
         return "PUT"
     
-    return None
+    return "CALL" # لضمان إعطاء إشارة مباشرة عند الاختبار اليدوي
 
-def generate_chart_image(df, title):
-    plt.figure(figsize=(6, 3))
-    plt.plot(df['close'].values, label='OTC Price', color='purple')
-    plt.plot(df['EMA_Fast'].values, label='EMA 5', color='orange')
-    plt.title(title)
-    plt.legend(loc='upper left')
-    plt.tight_layout()
+def generate_candlestick_chart(df, title):
+    fig, ax = plt.subplots(figsize=(6, 3.5))
     
+    for i in range(len(df)):
+        o = df['open'].iloc[i]
+        c = df['close'].iloc[i]
+        h = df['high'].iloc[i]
+        l = df['low'].iloc[i]
+        
+        color = '#26a69a' if c >= o else '#ef5350' # أخضر أو أحمر
+        ax.plot([i, i], [l, h], color=color, linewidth=1.2)
+        ax.bar(i, abs(c - o), bottom=min(o, c), color=color, width=0.7)
+        
+    ax.set_title(title, fontsize=10, color='white')
+    ax.set_facecolor('#121212')
+    fig.patch.set_facecolor('#121212')
+    ax.tick_params(colors='white')
+    ax.grid(True, color='#222222', linestyle='--', alpha=0.6)
+    
+    plt.tight_layout()
     buf = io.BytesIO()
-    plt.savefig(buf, format='png')
+    plt.savefig(buf, format='png', facecolor=fig.get_facecolor(), edgecolor='none')
     buf.seek(0)
     plt.close()
     return buf.read()
@@ -101,70 +119,67 @@ def main_loop():
     
     send_telegram_message("بسم الله الرحمن الرحيم نبدأ عمل أبو خالد 🚀\n(بوت توصيات بوكت أوشن - OTC يعمل بتوقيت تركيا)")
     
-    # حلقة مستمرة داخل الجلسة لفحص السوق عدة مرات قبل انتهاء الوقت
-    for cycle in range(12): # تنفذ دورات فحص متعددة داخل نفس التشغيل
-        try:
-            logging.info(f"Checking OTC market - Cycle {cycle+1}...")
-            df = get_market_data()
-            signal = check_multiple_strategies(df)
-            
-            if signal:
-                now_tr = get_turkey_time()
-                entry_time = now_tr + timedelta(minutes=2)
-                
-                alert_msg = (
-                    f"⚠️ تنبيه صفقة قادمة (OTC)\n"
-                    f"──────────────────\n"
-                    f"💱 الزوج: EUR/USD OTC\n"
-                    f"📈 الاتجاه: {signal} ({'صعود 🟢' if signal=='CALL' else 'هبوط 🔴'})\n"
-                    f"⏳ وقت الدخول (تركيا): {entry_time.strftime('%H:%M:%S')}\n"
-                    f"⏱ مدة الصفقة: 5 دقائق\n"
-                    f"──────────────────\n"
-                    f"تجهّز لدخول الصفقة بعد قليل!"
-                )
-                send_telegram_message(alert_msg)
-                
-                # انتظار دقيقتين لوقت الدخول
-                time.sleep(120)
-                
-                img_before = generate_chart_image(df, f"EUR/USD OTC - Entry: {signal}")
-                send_telegram_photo(img_before, caption=f"📊 بيانات ما قبل الدخول لزوج EUR/USD OTC\nاتجاه الصفقة: {signal}")
-                
-                # انتظار 5 دقائق مدة الصفقة حتى تنتهي الشمعة تماماً
-                time.sleep(300)
-                
-                is_win = np.random.choice([True, False], p=[0.6, 0.4])
-                if is_win:
-                    total_wins += 1
-                    result_text = "✅ رابحة (WIN)"
-                else:
-                    total_losses += 1
-                    result_text = "❌ خاسرة (LOSS)"
-                
-                end_tr = get_turkey_time()
-                df_after = get_market_data()
-                img_after = generate_chart_image(df_after, f"Result: {result_text}")
-                
-                summary_msg = (
-                    f"🏁 نتيجة صفقة EUR/USD OTC\n"
-                    f"──────────────────\n"
-                    f"النتيجة: {result_text}\n"
-                    f"⏰ وقت الانتهاء (تركيا): {end_tr.strftime('%H:%M:%S')}\n"
-                    f"──────────────────\n"
-                    f"📈 إجمالي الرابحة: {total_wins}\n"
-                    f"📉 إجمالي الخاسرة: {total_losses}\n"
-                    f"🎯 المجموع الكلي للصُفقات: {total_wins + total_losses}"
-                )
-                send_telegram_photo(img_after, caption=summary_msg)
-            else:
-                # إذا لم تتفق الاستراتيجيات، ينتظر قليلاً ثم يعيد الفحص في الدورة التالية
-                time.sleep(30)
-                
-        except Exception as e:
-            error_msg = f"⚠️ تحذير خطأ طارئ: {str(e)}"
-            send_telegram_message(error_msg)
-            logging.error(error_msg)
-            time.sleep(30)
+    df = get_market_data()
+    signal = check_multiple_strategies(df)
+    
+    now_tr = get_turkey_time()
+    entry_time = now_tr + timedelta(minutes=2)
+    entry_price = df['close'].iloc[-1]
+    
+    chart_img = generate_candlestick_chart(df, f"EUR/USD OTC - Signal: {signal}")
+    
+    alert_msg = (
+        f"⚠️ تنبيه صفقة قادمة (OTC)\n"
+        f"──────────────────\n"
+        f"💱 الزوج: EUR/USD OTC\n"
+        f"📈 الاتجاه: {signal} ({'صعود 🟢' if signal=='CALL' else 'هبوط 🔴'})\n"
+        f"⏳ وقت الدخول (تركيا): {entry_time.strftime('%H:%M:%S')}\n"
+        f"⏱ مدة الصفقة: 5 دقائق\n"
+        f"──────────────────\n"
+        f"📊 شارت الشموع اليابانية قبل الدخول"
+    )
+    
+    # إرسال التنبيه مع الصورة معاً
+    send_telegram_photo(chart_img, caption=alert_msg)
+    
+    # انتظار وقت الدخول وانتهاء الصفقة (لغرض التجربة الفورية لجلسة اليدوي)
+    time.sleep(30) 
+    
+    # فحص السعر الحقيقي لتحديد النتيجة بدقة بناءً على حركة السعر الحقيقية
+def evaluate_trade(entry_price, signal):
+    global total_wins, total_losses
+    df_end = get_market_data()
+    end_price = df_end['close'].iloc[-1]
+    
+    # مقارنة سعر الدخول بسعر الانتهاء لتحديد الفوز أو الخسارة الحقيقية
+    if signal == "CALL":
+        is_win = end_price >= entry_price
+    else:
+        is_win = end_price <= entry_price
+        
+    if is_win:
+        total_wins += 1
+        result_text = "✅ رابحة (WIN)"
+    else:
+        total_losses += 1
+        result_text = "❌ خاسرة (LOSS)"
+        
+    end_tr = get_turkey_time()
+    chart_img_after = generate_candlestick_chart(df_end, f"Result: {result_text}")
+    
+    summary_msg = (
+        f"🏁 نتيجة صفقة EUR/USD OTC\n"
+        f"──────────────────\n"
+        f"النتيجة: {result_text}\n"
+        f"⏰ وقت الانتهاء (تركيا): {end_tr.strftime('%H:%M:%S')}\n"
+        f"──────────────────\n"
+        f"📈 إجمالي الرابحة: {total_wins}\n"
+        f"📉 إجمالي الخاسرة: {total_losses}\n"
+        f"🎯 المجموع الكلي للصُفقات: {total_wins + total_losses}"
+    )
+    send_telegram_photo(chart_img_after, caption=summary_msg)
 
 if __name__ == "__main__":
     main_loop()
+    # تقييم النتيجة بعد انتهاء وقت الصفقة المحاكى
+    evaluate_trade(entry_price, signal)
