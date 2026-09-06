@@ -1,4 +1,4 @@
+pocket-option
 pandas
 numpy
 matplotlib
-requests
