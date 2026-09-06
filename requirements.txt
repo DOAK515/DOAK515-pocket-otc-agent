@@ -1,5 +1,4 @@
 pandas
 numpy
 matplotlib
-websocket-client
-pocketoptionapi
+requests
