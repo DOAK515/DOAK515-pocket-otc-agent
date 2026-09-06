@@ -1,9 +1,7 @@
 name: Run Trading Bot
 
 on:
-  schedule:
-    - cron: '*/15 * * * *' # يعمل تلقائياً كل 15 دقيقة بشكل مستمر
-  workflow_dispatch:      # يتيح لك تشغيله يدوياً متى شئت بضغطة زر
+  workflow_dispatch: # يعمل فقط عندما تضغط يدوياً من جيت هب ولن يعمل تلقائياً أبداً
 
 jobs:
   build:
