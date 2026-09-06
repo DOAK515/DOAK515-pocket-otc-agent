@@ -29,9 +29,9 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# === إعدادات التيليجرام ===
-TOKEN = "YOUR_BOT_TOKEN"    # ضع توكن البوت هنا
-CHAT_ID = "YOUR_CHAT_ID"    # ضع معرف الشات أو القناة هنا
+# === إعدادات التيليجرام (تمت الإضافة بنجاح) ===
+TOKEN = "8341287362:AAF0hO6PMtcP5O2Y-sF34OffcN_zeLbIKNo"
+CHAT_ID = "-1003151787212"
 
 def send_telegram_message(text):
     try:
@@ -65,7 +65,6 @@ def send_telegram_photo(photo_bytes, caption=""):
 
 # === محاكاة جلب بيانات السوق والتحليل الفني متعدد الاستراتيجيات ===
 def get_market_data():
-    # هنا يتم جلب أو توليد بيانات الشموع (مثلاً لزوج EUR/USD)
     np.random.seed(int(time.time() % 100))
     prices = 1.0800 + np.cumsum(np.random.normal(0, 0.0002, 50))
     df = pd.DataFrame({'close': prices})
@@ -84,14 +83,7 @@ def get_market_data():
     return df
 
 def check_multiple_strategies(df):
-    """
-    التحقق من اجماع عدة استراتيجيات:
-    1. تقاطع المتوسطات (EMA Fast > EMA Slow)
-    2. مؤشر القوة النسبية RSI (أعلى من 50 للشراء أو أقل للبيع مع تجنب مناطق التشبع)
-    """
     last_row = df.iloc[-1]
-    prev_row = df.iloc[-2]
-    
     rsi = last_row['RSI']
     ema_fast = last_row['EMA_Fast']
     ema_slow = last_row['EMA_Slow']
@@ -103,7 +95,7 @@ def check_multiple_strategies(df):
     elif ema_fast < ema_slow and 30 < rsi < 50:
         return "PUT"
     
-    return None # السوق متقلب أو الاستراتيجيات لم تتفق
+    return None
 
 def generate_chart_image(df, title):
     plt.figure(figsize=(6, 3))
@@ -136,7 +128,7 @@ def main_loop():
             if signal:
                 # 1. إرسال تنبيه مبكر قبل دخول الصفقة
                 send_telegram_message(f"⚠️ تنبيه مبكر: تم رصد إجماع للاستراتيجيات لزوج EUR/USD ({signal}). تجهّز خلال دقيقتين!")
-                time.sleep(120) # انتظار دقيقتين قبل الدخول الفعلي
+                time.sleep(120)
                 
                 # التقاط صورة البيانات قبل الصفقة
                 img_before = generate_chart_image(df, f"Before Entry: {signal}")
@@ -145,8 +137,8 @@ def main_loop():
                 # محاكاة مدة الصفقة (5 دقائق)
                 time.sleep(300)
                 
-                # تقييم النتيجة (مربحة / خاسرة عشوائية كمحاكاة أو مقارنة حقيقية لاحقاً)
-                is_win = np.random.choice([True, False], p=[0.6, 0.4]) # نسبة نجاح أعلى لدقة الاستراتيجيات المجتمعة
+                # تقييم النتيجة
+                is_win = np.random.choice([True, False], p=[0.6, 0.4])
                 if is_win:
                     total_wins += 1
                     result_text = "✅ رابحة (WIN)"
@@ -154,7 +146,6 @@ def main_loop():
                     total_losses += 1
                     result_text = "❌ خاسرة (LOSS)"
                 
-                # بيانات بعد الصفقة
                 df_after = get_market_data()
                 img_after = generate_chart_image(df_after, f"Result: {result_text}")
                 
@@ -167,7 +158,6 @@ def main_loop():
                 )
                 send_telegram_photo(img_after, caption=summary_msg)
             
-            # فحص السوق كل دقيقتين إذا لم تكن هناك إشارة
             time.sleep(120)
             
         except Exception as e:
@@ -177,8 +167,5 @@ def main_loop():
             time.sleep(60)
 
 if __name__ == "__main__":
-    # تشغيل سيرفر البقاء نشطاً (Keep-Alive) لمنع المنصة من إيقاف البوت
     keep_alive()
-    
-    # تشغيل البوت الرئيسي
     main_loop()
